@@ -1,0 +1,30 @@
+# 비밀 정보 (API 키)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# 대용량 원본 데이터 (샘플만 커밋)
+data/raw/
+*.shp
+*.dbf
+*.shx
+*.zip
+
+# OS / 에디터
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
