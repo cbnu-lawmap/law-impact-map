@@ -9,7 +9,7 @@ CSV 데이터 보관 폴더
 | 법안 | 열린국회정보 Open API | | |
 | 건축물대장 | 건축데이터 개방 | | 1차 판정은 아래 건물통합정보로 충분, 세대수·층별용도가 필요할 때 보완 |
 | 건물 도형 | 브이월드(V-WORLD) | | |
-| `bldginfo_사창동.csv` | 브이월드 WFS `lt_c_bldginfo` (건물통합정보) | 2026-10-31 | 사창동(행정동) 경계 안 2,448동, 건물명(`bld_nm`) 제외. 같은 이름의 `.geojson`은 커밋하지 않음 (`collect/fetch_cheongju_buildings.py`로 재생성) |
+| `bldginfo_사창동.csv` / `.geojson` | 브이월드 WFS `lt_c_bldginfo` (건물통합정보) | 2026-10-31 | 사창동(행정동) 경계 안 2,448동, 건물명(`bld_nm`) 제외. CSV는 속성, geojson은 지도용 도형 (`collect/fetch_cheongju_buildings.py`로 재생성) |
 | `cheongju_emd.geojson` | 바람의 지도 프로젝트에서 복사 (원 출처 확인 필요) | 2026-10-31 복사 | 청주 행정동 43개 경계 |
 | `cheongju_buildings_footprint.geojson` | 출처 확인 필요 | 2026-10-31 복사 | 13,166동, 높이(`h`)만. 청주 전체가 아님 (사창동 경계 안 150동) |
 
