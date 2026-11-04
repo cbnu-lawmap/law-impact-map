@@ -2,7 +2,7 @@
 
 
 
-호출: https://open.assembly.go.kr/portal/openapi/{서비스ID}  (KEY, TYPE=json, pIndex, pSize)
+호출: https://open.assembly.go.kr/portal/openapi/{서비스ID} (KEY, TYPE=json, pIndex, pSize)
 
 
 
