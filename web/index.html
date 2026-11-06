@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>법안 영향 지도 · 이 법 통과되면 우리 동네 몇 채?</title>
+  <meta name="description" content="국회 계류 법안의 적용 기준을 건물 데이터와 대조해 영향받는 건물을 지도에 표시하는 시제품 (청주시 사창동)" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <h1>법안 영향 지도</h1>
+      <p class="sub">이 법 통과되면 우리 동네 몇 채?</p>
+    </div>
+    <div class="region"><span class="dot"></span>시범 지역 · 청주시 서원구 <b>사창동</b> <span class="muted" id="bldg-total"></span></div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel" id="panel">
+      <section class="filters">
+        <div class="filter-head">
+          <h2>분야</h2>
+          <div class="filter-actions">
+            <button type="button" id="f-all">전체</button>
+            <button type="button" id="f-none">해제</button>
+          </div>
+        </div>
+        <div id="field-list" class="field-list"></div>
+        <input id="search" type="search" placeholder="법안명·번호·제안이유 검색" autocomplete="off" />
+        <p class="muted small" id="bill-count"></p>
+      </section>
+
+      <section id="detail" class="detail hidden" aria-live="polite"></section>
+
+      <section class="bills">
+        <ul id="bill-list"></ul>
+      </section>
+    </aside>
+
+    <div class="map-wrap">
+      <div id="map" role="region" aria-label="사창동 건물 지도"></div>
+      <div class="legend" id="legend"></div>
+    </div>
+  </main>
+
+  <footer class="notice">
+    판정 결과는 건축물 데이터 기반 추정이며 법률 판단이 아닙니다. 소유자 등 개인정보를 수집하지 않습니다.
+  </footer>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="judge.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
