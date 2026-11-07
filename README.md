@@ -14,6 +14,10 @@
 <img src="https://img.shields.io/badge/GeoJSON-111827?style=flat-square" alt="GeoJSON" />
 
 <br />
+
+**[🗺️ 시제품 바로가기 (사창동 시범)](https://cbnu-lawmap.github.io/law-impact-map/)**
+
+<br />
 충북대학교 소프트웨어학부 「인공지능 프로그래밍」 2026-2 기말 팀 프로젝트 · C조
 </div>
 
@@ -90,7 +94,8 @@ law-impact-map/
 ├─ collect/    # 수집·전처리 (Python)
 │  └─ fetch_cheongju_buildings.py   # 브이월드 건물통합정보 동 단위 수집
 ├─ backend/    # 분야 분류, RAG 기준 추출, 판정 API
-├─ frontend/   # 지도 화면
+├─ frontend/   # 지도 화면 (본 구현 예정)
+├─ web/        # 1차 시제품: 정적 웹 지도 (Leaflet, GitHub Pages 배포)
 ├─ data/       # 샘플 데이터 (CSV, GeoJSON)
 └─ docs/       # 기획, 아키텍처, 데이터 점검, 트러블슈팅
 ```
@@ -127,6 +132,13 @@ VWORLD_KEY=         # 브이월드 (Referer 등록 도메인 필요)
 python collect/fetch_cheongju_buildings.py --emd 사창동
 ```
 
+웹 시제품 데이터 생성과 로컬 실행 (`web/data/`를 다시 만든 뒤 http://localhost:8000 접속)
+
+```bash
+python collect/build_web_data.py
+python -m http.server 8000 --directory web
+```
+
 <br />
 
 ## 🔒 Policy & Ethics
@@ -148,9 +160,11 @@ python collect/fetch_cheongju_buildings.py --emd 사창동
 | 주제·역할·협업 규칙 확정 | 완료 |
 | 저장소·폴더 구조 | 완료 |
 | 사창동 건물 수집·점검 | 완료 |
-| 열린국회정보 법안 수집 | 진행 중 |
-| 분야 분류·기준 추출 (AI) | 예정 |
-| 건물 판정·지도 화면 | 예정 |
+| 열린국회정보 법안 수집 (22대 계류 678건) | 완료 |
+| 분야 분류 (9개 분야, Keras 신경망) | 완료 |
+| 기준 추출 (AI) | 예정 |
+| 건물 판정 (수작업 시범 2건) | 진행 중 |
+| 지도 화면 | 1차 공개 ([시제품](https://cbnu-lawmap.github.io/law-impact-map/)) |
 | 보고서(한글)·발표자료(PPT) | 예정 |
 
 <br />

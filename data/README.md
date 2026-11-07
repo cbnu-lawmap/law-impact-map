@@ -14,3 +14,5 @@ CSV 데이터 보관 폴더
 | `cheongju_buildings_footprint.geojson` | 출처 확인 필요 | 2026-10-31 복사 | 13,166동, 높이(`h`)만. 청주 전체가 아님 (사창동 경계 안 150동) |
 
 점검 결과는 [docs/data_check.md](../docs/data_check.md) 참고.
+
+웹 시제품용 경량 데이터는 `collect/build_web_data.py`로 `web/data/`에 생성한다 (건물명 등 이름 필드 제외, `cheongju_buildings_footprint.geojson`은 출처 불명이라 사용하지 않음).
