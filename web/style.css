@@ -127,7 +127,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 
 /* 범례 */
 .legend {
-  position: absolute; z-index: 500; right: 12px; bottom: 12px;
+  position: absolute; z-index: 500; right: 12px; bottom: 34px;
   background: rgba(255,255,255,0.95); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(20,30,50,0.08);
   max-width: 240px;
@@ -138,7 +138,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 .legend .n { margin-left: auto; padding-left: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* 건물 카드 */
-.leaflet-popup-content { margin: 10px 12px; font-family: inherit; }
+.maplibregl-popup-content { padding: 10px 12px; font-family: inherit; border-radius: 8px; }
 .bcard h4 { margin: 0 0 6px; font-size: 13px; }
 .bcard table { border-collapse: collapse; font-size: 12.5px; }
 .bcard th { text-align: left; color: var(--muted); font-weight: 500; padding: 1px 10px 1px 0; white-space: nowrap; }
@@ -165,9 +165,12 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
   .panel { border-right: 0; overflow: visible; }
   .bills { overflow: visible; }
   .detail { max-height: none; }
-  .legend { right: 8px; bottom: 8px; font-size: 11px; padding: 6px 8px; }
+  .legend { right: 8px; bottom: 30px; font-size: 10.5px; padding: 5px 7px; line-height: 1.35; }
+  .legend h4, .legend .legend-note { display: none; }
+  .legend .sw { width: 10px; height: 10px; }
   .notice { font-size: 11.5px; }
 }
 
-/* 바탕지도는 흑백으로 눌러 건물 색이 잘 보이게 */
-.leaflet-tile-pane { filter: grayscale(1) contrast(0.9) brightness(1.05); }
+/* 2D/3D 전환 버튼 */
+.view-toggle button { font-size: 11px; font-weight: 700; width: 29px; height: 29px; }
+.legend-note { margin-top: 4px; }

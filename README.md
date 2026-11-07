@@ -95,7 +95,7 @@ law-impact-map/
 │  └─ fetch_cheongju_buildings.py   # 브이월드 건물통합정보 동 단위 수집
 ├─ backend/    # 분야 분류, RAG 기준 추출, 판정 API
 ├─ frontend/   # 지도 화면 (본 구현 예정)
-├─ web/        # 1차 시제품: 정적 웹 지도 (Leaflet, GitHub Pages 배포)
+├─ web/        # 1차 시제품: 정적 3D 웹 지도 (MapLibre GL JS, GitHub Pages 배포)
 ├─ data/       # 샘플 데이터 (CSV, GeoJSON)
 └─ docs/       # 기획, 아키텍처, 데이터 점검, 트러블슈팅
 ```
