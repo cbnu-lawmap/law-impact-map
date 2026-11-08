@@ -50,8 +50,19 @@
     판정 결과는 건축물 데이터 기반 추정이며 법률 판단이 아닙니다. 소유자 등 개인정보를 수집하지 않습니다.
   </footer>
 
+  <script>
+    // 브이월드 WebGL 3D 지도 (버전 3.0). 키는 저장소에 두지 않고 배포할 때 GitHub Secret(VWORLD_KEY)으로 넣는다.
+    // 키가 없으면(__로 시작하는 자리표시자 그대로) 브이월드를 불러오지 않고 기본 3D 지도를 쓴다.
+    (function () {
+      var key = "__VWORLD_KEY__";
+      if (key.indexOf("__") === 0) return;
+      document.write('<script src="https://map.vworld.kr/js/webglMapInit.js.do?version=3.0&apiKey=' +
+        encodeURIComponent(key) + "&domain=" + encodeURIComponent(location.origin) + '"><\/script>');
+    })();
+  </script>
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="judge.js"></script>
+  <script src="vworld.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

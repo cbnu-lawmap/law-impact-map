@@ -1,4 +1,4 @@
-/* 법안 영향 지도 — 화면 로직 (MapLibre GL JS 3D, 빌드 도구 없음) */
+/* 법안 영향 지도 — 화면 로직 (브이월드 3D 지도, 실패 시 MapLibre GL JS 3D, 빌드 도구 없음) */
 (function () {
   "use strict";
 
@@ -40,40 +40,54 @@
   };
   var fmt = function (n) { return Number(n).toLocaleString("ko-KR"); };
 
-  // ---------------------------------------------------------------- 지도 (MapLibre 3D)
-  var FLOOR_M = 3;        // 층당 높이 가정 (m)
+  // ---------------------------------------------------------------- 지도
+  // 브이월드 API 키가 들어 있으면 브이월드 3D 지도, 없거나 실패하면 기본 3D 지도(MapLibre)
+  var FLOOR_M = 3;        // 층당 높이 가정 (m), 기본 지도와 브이월드 덧칠 미지원 시 사용
   var NO_FLOOR_M = 1.5;   // 층수 정보가 없는 건물은 낮게
   var VIEW_3D = { pitch: 55, bearing: -20 };
+  var engine = null;      // "vworld" | "basic"
+  var map = null;         // MapLibre 지도 (기본 지도일 때)
+  var vmap = null;        // 브이월드 지도
 
-  var map = new maplibregl.Map({
-    container: "map",
-    // 바탕지도: 키가 필요 없는 OpenStreetMap 표준 타일 (흑백 처리)
-    style: {
-      version: 8,
-      sources: {
-        osm: {
-          type: "raster",
-          tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-          tileSize: 256,
-          maxzoom: 19,
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보',
+  function createBasicMap() {
+    map = new maplibregl.Map({
+      container: "map",
+      // 바탕지도: 키가 필요 없는 OpenStreetMap 표준 타일 (흑백 처리)
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: "raster",
+            tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
+            tileSize: 256,
+            maxzoom: 19,
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보',
+          },
         },
+        layers: [{
+          id: "osm", type: "raster", source: "osm",
+          paint: { "raster-saturation": -1, "raster-contrast": -0.15, "raster-brightness-min": 0.08 },
+        }],
       },
-      layers: [{
-        id: "osm", type: "raster", source: "osm",
-        paint: { "raster-saturation": -1, "raster-contrast": -0.15, "raster-brightness-min": 0.08 },
-      }],
-    },
-    center: [127.462, 36.6345],
-    zoom: 15,
-    pitch: VIEW_3D.pitch,
-    bearing: VIEW_3D.bearing,
-    maxPitch: 75,
-    attributionControl: { compact: false },
-  });
-  map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-left");
+      center: [127.462, 36.6345],
+      zoom: 15,
+      pitch: VIEW_3D.pitch,
+      bearing: VIEW_3D.bearing,
+      maxPitch: 75,
+      attributionControl: { compact: false },
+    });
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-left");
+    map.addControl(new ViewToggle(), "top-left");
 
-  // 2D / 3D 전환 버튼
+    // 바탕지도 타일을 다 받기(load) 전에 건물부터 올린다.
+    // 스타일을 객체로 넘기면 style.load 가 생성자 안에서 이미 끝날 수 있어 내부 플래그도 확인한다.
+    // (isStyleLoaded()는 타일 로딩 중이면 false 라서 쓸 수 없음)
+    return new Promise(function (resolve) {
+      if (map.style && map.style._loaded) resolve(); else map.once("style.load", resolve);
+    });
+  }
+
+  // 2D / 3D 전환 버튼 (기본 지도)
   function ViewToggle() {}
   ViewToggle.prototype.onAdd = function () {
     var div = document.createElement("div");
@@ -88,14 +102,48 @@
     return div;
   };
   ViewToggle.prototype.onRemove = function () {};
-  map.addControl(new ViewToggle(), "top-left");
 
-  // 바탕지도 타일을 다 받기(load) 전에 건물부터 올린다.
-  // 스타일을 객체로 넘기면 style.load 가 생성자 안에서 이미 끝날 수 있어 내부 플래그도 확인한다.
-  // (isStyleLoaded()는 타일 로딩 중이면 false 라서 쓸 수 없음)
-  var mapReady = new Promise(function (resolve) {
-    if (map.style && map.style._loaded) resolve(); else map.once("style.load", resolve);
-  });
+  function startMap(bnd) {
+    if (window.vw && window.vw.Map && window.VWorldMap) {
+      engine = "vworld";
+      renderLegend();
+      vmap = VWorldMap.create({ mapId: "map", onPick: showVWorldPopup });
+      return vmap.ready.then(function () {
+        vmap.add(state.buildings, bnd,
+          function (i) { return state.buildings.features[i].properties._color; },
+          function (i) { return state.buildings.features[i].properties._h; });
+        renderLegend();
+      }).catch(function (err) {
+        console.warn("브이월드 3D 지도를 쓰지 못해 기본 3D 지도로 표시합니다:", err.message);
+        vmap = null;
+        $("map").innerHTML = "";
+        return startBasic(bnd);
+      });
+    }
+    return startBasic(bnd);
+  }
+
+  function startBasic(bnd) {
+    engine = "basic";
+    renderLegend();
+    return createBasicMap().then(function () { addLayers(bnd); });
+  }
+
+  // 브이월드 지도의 건물 속성 카드
+  function showVWorldPopup(i, pos) {
+    var old = document.querySelector(".vw-popup");
+    if (old) old.remove();
+    if (i === null) return;
+    var div = document.createElement("div");
+    div.className = "vw-popup";
+    div.innerHTML = '<button type="button" class="close" aria-label="닫기">×</button>' + buildingCard(state.props[i]);
+    $("map").parentNode.appendChild(div);
+    var wrap = $("map").getBoundingClientRect();
+    var w = div.offsetWidth, h = div.offsetHeight;
+    div.style.left = Math.max(8, Math.min(pos.x + 12, wrap.width - w - 8)) + "px";
+    div.style.top = Math.max(8, Math.min(pos.y - h / 2, wrap.height - h - 8)) + "px";
+    div.querySelector(".close").addEventListener("click", function () { div.remove(); });
+  }
 
   function heightOf(p) {
     return Judge.isEmpty(p.grnd_flr) ? NO_FLOOR_M : Number(p.grnd_flr) * FLOOR_M;
@@ -180,7 +228,12 @@
           '<span class="n">' + fmt(counts.get(b) || 0) + "</span></div>";
       }).join("");
     }
-    html += '<div class="row muted small legend-note">높이: 지상층수 × ' + FLOOR_M + 'm (추정)</div>';
+    if (engine === "vworld") {
+      html += '<div class="row muted small legend-note">' +
+        (vmap && vmap.classify() ? "건물: 브이월드 3D 모델 · 색: 바닥면 기준" : "높이: 지상층수 × " + FLOOR_M + "m (추정)") + "</div>";
+    } else {
+      html += '<div class="row muted small legend-note">높이: 지상층수 × ' + FLOOR_M + "m (추정)</div>";
+    }
     $("legend").innerHTML = html;
   }
 
@@ -189,8 +242,12 @@
       state.buildings.features.forEach(function (f) {
         f.properties._color = colorFor(state.props[f.properties._i]);
       });
-      var src = map.getSource("bldg");
-      if (src) src.setData(state.buildings);
+      if (engine === "vworld" && vmap) {
+        vmap.recolor(function (i) { return state.buildings.features[i].properties._color; });
+      } else if (map) {
+        var src = map.getSource("bldg");
+        if (src) src.setData(state.buildings);
+      }
     }
     renderLegend();
   }
@@ -345,7 +402,7 @@
     renderLegend();
     selfCheck();
 
-    return mapReady.then(function () { addLayers(bnd); });
+    return startMap(bnd);
   }).catch(function (err) {
     console.error(err);
     $("bill-list").innerHTML = '<li class="muted">데이터를 불러오지 못했습니다: ' + esc(err.message) + "</li>";
