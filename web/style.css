@@ -127,7 +127,7 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 
 /* 범례 */
 .legend {
-  position: absolute; z-index: 500; right: 12px; bottom: 34px;
+  position: absolute; z-index: 2000; right: 12px; bottom: 34px;
   background: rgba(255,255,255,0.95); border: 1px solid var(--line); border-radius: 8px;
   padding: 8px 10px; font-size: 12px; box-shadow: 0 2px 8px rgba(20,30,50,0.08);
   max-width: 240px;
@@ -174,3 +174,14 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 /* 2D/3D 전환 버튼 */
 .view-toggle button { font-size: 11px; font-weight: 700; width: 29px; height: 29px; }
 .legend-note { margin-top: 4px; }
+
+/* 브이월드 지도 건물 카드 */
+.vw-popup {
+  position: absolute; z-index: 2100; max-width: 260px;
+  background: #fff; border-radius: 8px; padding: 10px 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+}
+.vw-popup .close {
+  position: absolute; top: 4px; right: 6px; border: 0; background: none;
+  font-size: 16px; line-height: 1; cursor: pointer; color: var(--muted);
+}

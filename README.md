@@ -95,7 +95,7 @@ law-impact-map/
 │  └─ fetch_cheongju_buildings.py   # 브이월드 건물통합정보 동 단위 수집
 ├─ backend/    # 분야 분류, RAG 기준 추출, 판정 API
 ├─ frontend/   # 지도 화면 (본 구현 예정)
-├─ web/        # 1차 시제품: 정적 3D 웹 지도 (MapLibre GL JS, GitHub Pages 배포)
+├─ web/        # 1차 시제품: 정적 3D 웹 지도 (브이월드 3D, 키 없으면 MapLibre GL JS · GitHub Pages 배포)
 ├─ data/       # 샘플 데이터 (CSV, GeoJSON)
 └─ docs/       # 기획, 아키텍처, 데이터 점검, 트러블슈팅
 ```
@@ -138,6 +138,8 @@ python collect/fetch_cheongju_buildings.py --emd 사창동
 python collect/build_web_data.py
 python -m http.server 8000 --directory web
 ```
+
+배포 사이트는 브이월드 WebGL 3D 지도를 씁니다. 브이월드 키는 저장소에 커밋하지 않고, 배포 도메인(`https://cbnu-lawmap.github.io`) 전용으로 발급한 키를 GitHub Secret `VWORLD_KEY`에 넣으면 배포할 때 `web/index.html`에 들어갑니다. 키가 없거나 브이월드 지도를 띄우지 못하면 기본 3D 지도(MapLibre, OSM 바탕)로 표시합니다. 로컬 실행은 키 없이 기본 3D 지도로 열립니다.
 
 <br />
 

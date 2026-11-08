@@ -26,6 +26,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
+      # 브이월드 키는 저장소에 커밋하지 않고 배포본에만 넣는다 (키는 배포 도메인 전용으로 발급)
+      - name: Insert VWorld key
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+        run: |
+          if [ -n "$VWORLD_KEY" ]; then
+            sed -i "s/__VWORLD_KEY__/${VWORLD_KEY}/" web/index.html
+            echo "VWorld key inserted"
+          else
+            echo "VWORLD_KEY secret not set: basic map only"
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
