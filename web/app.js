@@ -49,6 +49,37 @@
   var map = null;         // MapLibre 지도 (기본 지도일 때)
   var vmap = null;        // 브이월드 지도
 
+  // 스크립트·스타일을 필요할 때만 불러온다 (브이월드 지도일 때는 MapLibre 를 받지 않음)
+  function loadAsset(tag, attrs) {
+    return new Promise(function (resolve, reject) {
+      var el = document.createElement(tag);
+      Object.keys(attrs).forEach(function (k) { el[k] = attrs[k]; });
+      el.onload = resolve;
+      el.onerror = function () { reject(new Error((attrs.src || attrs.href) + " 불러오기 실패")); };
+      document.head.appendChild(el);
+    });
+  }
+  var MAPLIBRE = "https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl";
+  function loadMapLibre() {
+    if (window.maplibregl) return Promise.resolve();
+    return Promise.all([
+      loadAsset("link", { rel: "stylesheet", href: MAPLIBRE + ".css" }),
+      loadAsset("script", { src: MAPLIBRE + ".js" }),
+    ]);
+  }
+
+  // 지도 종류: ?map=basic 이면 가벼운 지도. 브이월드 키가 있으면 기본은 브이월드 3D
+  var wantBasic = /[?&]map=basic(&|$)/.test(location.search);
+  if (window.vw && window.vw.Map && window.VWorldMap && !wantBasic) {
+    // 데이터를 받는 동안 브이월드 지도를 먼저 띄운다
+    engine = "vworld";
+    vmap = VWorldMap.create({
+      mapId: "map",
+      onPick: showVWorldPopup,
+      onMove: function () { var p = document.querySelector(".lm-popup"); if (p) p.remove(); },
+    });
+  }
+
   function createBasicMap() {
     map = new maplibregl.Map({
       container: "map",
@@ -104,10 +135,9 @@
   ViewToggle.prototype.onRemove = function () {};
 
   function startMap(bnd) {
-    if (window.vw && window.vw.Map && window.VWorldMap) {
-      engine = "vworld";
+    renderEngineToggle();
+    if (vmap) {
       renderLegend();
-      vmap = VWorldMap.create({ mapId: "map", onPick: showVWorldPopup });
       return vmap.ready.then(function () {
         vmap.add(state.buildings, bnd,
           function (i) { return state.buildings.features[i].properties._color; },
@@ -126,7 +156,22 @@
   function startBasic(bnd) {
     engine = "basic";
     renderLegend();
-    return createBasicMap().then(function () { addLayers(bnd); });
+    renderEngineToggle();
+    return loadMapLibre().then(createBasicMap).then(function () { addLayers(bnd); });
+  }
+
+  // 실사 3D(브이월드) ↔ 가벼운 지도 전환 버튼. 브이월드 키가 있을 때만 보인다
+  function renderEngineToggle() {
+    if (!window.VWORLD_ON) return;
+    var old = document.querySelector(".engine-toggle");
+    if (old) old.remove();
+    var basic = engine !== "vworld";
+    var a = document.createElement("a");
+    a.className = "engine-toggle";
+    a.href = basic ? location.pathname : location.pathname + "?map=basic";
+    a.textContent = basic ? "실사 3D 지도로 보기" : "가벼운 지도로 보기";
+    a.title = basic ? "브이월드 항공사진·3D 건물 (컴퓨터 사양이 필요)" : "느릴 때: 층수로 세운 간단한 3D 지도";
+    $("map").parentNode.appendChild(a);
   }
 
   // 브이월드 지도의 건물 속성 카드
@@ -237,7 +282,11 @@
     $("legend").innerHTML = html;
   }
 
+  var colorKey = null;   // 지금 칠한 색 기준 (노후도 / 판정 시범 번호)
   function restyle() {
+    var key = currentDemo() ? state.selected : "age";
+    if (key === colorKey) { renderLegend(); return; }
+    colorKey = key;
     if (state.buildings) {
       state.buildings.features.forEach(function (f) {
         f.properties._color = colorFor(state.props[f.properties._i]);
@@ -269,7 +318,7 @@
     return state.bills.filter(function (b) {
       if (!state.checked.has(b.field)) return false;
       if (!q) return true;
-      return (b.name + " " + b.no + " " + b.summary + " " + b.committee).toLowerCase().indexOf(q) >= 0;
+      return b._q.indexOf(q) >= 0;
     });
   }
 
@@ -354,7 +403,12 @@
     state.checked.clear();
     renderFields(); renderBills();
   });
-  $("search").addEventListener("input", function (e) { state.query = e.target.value; renderBills(); });
+  var searchTimer = null;
+  $("search").addEventListener("input", function (e) {
+    state.query = e.target.value;
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(renderBills, 120);
+  });
   $("bill-list").addEventListener("click", function (e) {
     var li = e.target.closest("li[data-no]");
     if (li) select(li.getAttribute("data-no"));
@@ -382,6 +436,7 @@
 
     state.fields = bills.fields;
     state.bills = bills.bills;
+    state.bills.forEach(function (b) { b._q = (b.name + " " + b.no + " " + b.summary + " " + b.committee).toLowerCase(); });
     Object.keys(state.fields).forEach(function (k) { state.checked.add(Number(k)); });
     state.checked.add(null); // 분야 예측이 없는 법안
     demo.demos.forEach(function (d) { state.demos[d.bill_no] = d; });
@@ -397,6 +452,7 @@
       }),
     };
 
+    colorKey = "age";
     renderFields();
     renderBills();
     renderLegend();
