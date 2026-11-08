@@ -114,6 +114,7 @@
   /**
    * opts.mapId   지도 div 아이디
    * opts.onPick  function(index | null, {x, y}) 건물 클릭 시
+   * opts.onMove  function() 지도를 움직이기 시작할 때
    * 반환: { ready: Promise, add(buildings, boundary, colorOf, heightOf), recolor(colorOf) }
    */
   function create(opts) {
@@ -139,6 +140,14 @@
           // 가만히 있을 때는 다시 그리지 않는다 (조작·타일 로딩·색 변경 때만 그림) → CPU/GPU 부담 감소
           viewer.scene.requestRenderMode = true;
           viewer.scene.maximumRenderTimeChange = Infinity;
+          // 휴대폰·태블릿: 화질을 조금 낮춰 부담을 줄인다 (가장자리 다듬기·안개 끄기, 지형 타일 덜 세밀하게)
+          if (global.matchMedia && matchMedia("(pointer: coarse)").matches) {
+            if (viewer.scene.postProcessStages.fxaa) viewer.scene.postProcessStages.fxaa.enabled = false;
+            viewer.scene.fog.enabled = false;
+            viewer.scene.globe.maximumScreenSpaceError = 3;
+          }
+          // 지도를 움직이기 시작하면 건물 카드를 닫는다 (카드가 엉뚱한 곳에 남지 않게)
+          viewer.camera.moveStart.addEventListener(function () { if (opts.onMove) opts.onMove(); });
           classify = !!(Cesium.ClassificationType && Cesium.ClassificationType.BOTH !== undefined &&
             Cesium.GroundPrimitive);
           resolve();

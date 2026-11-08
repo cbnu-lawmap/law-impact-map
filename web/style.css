@@ -185,3 +185,13 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
   position: absolute; top: 4px; right: 6px; border: 0; background: none;
   font-size: 16px; line-height: 1; cursor: pointer; color: var(--muted);
 }
+
+/* 실사 3D ↔ 가벼운 지도 전환 */
+.engine-toggle {
+  position: absolute; z-index: 2000; left: 12px; bottom: 34px;
+  background: rgba(255,255,255,0.95); border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 10px; font-size: 12px; color: var(--accent); text-decoration: none;
+  box-shadow: 0 2px 8px rgba(20,30,50,0.08);
+}
+.engine-toggle:hover { background: #fff; }
+@media (max-width: 760px) { .engine-toggle { bottom: 30px; left: 8px; } }
