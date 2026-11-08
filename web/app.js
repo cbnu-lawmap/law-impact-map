@@ -68,13 +68,18 @@
     ]);
   }
 
-  // 지도 종류: ?map=basic 이면 가벼운 지도. 브이월드 키가 있으면 기본은 브이월드 3D
+  // 지도 종류 (브이월드 키가 있을 때)
+  //   기본        브이월드 항공사진 + 층수 높이 상자 건물 (가벼움)
+  //   ?map=real  브이월드 실제 3D 건물 모델 + 바닥면 색 덧칠 (무거움)
+  //   ?map=basic MapLibre 흑백 지도 + 상자 건물 (브이월드를 받지 않음)
   var wantBasic = /[?&]map=basic(&|$)/.test(location.search);
+  var wantReal = /[?&]map=real(&|$)/.test(location.search);
   if (window.vw && window.vw.Map && window.VWorldMap && !wantBasic) {
     // 데이터를 받는 동안 브이월드 지도를 먼저 띄운다
     engine = "vworld";
     vmap = VWorldMap.create({
       mapId: "map",
+      realModels: wantReal,
       onPick: showVWorldPopup,
       onMove: function () { var p = document.querySelector(".lm-popup"); if (p) p.remove(); },
     });
@@ -160,18 +165,28 @@
     return loadMapLibre().then(createBasicMap).then(function () { addLayers(bnd); });
   }
 
-  // 실사 3D(브이월드) ↔ 가벼운 지도 전환 버튼. 브이월드 키가 있을 때만 보인다
+  // 지도 종류 전환 링크. 브이월드 키가 있을 때만 보인다
   function renderEngineToggle() {
     if (!window.VWORLD_ON) return;
     var old = document.querySelector(".engine-toggle");
     if (old) old.remove();
-    var basic = engine !== "vworld";
-    var a = document.createElement("a");
-    a.className = "engine-toggle";
-    a.href = basic ? location.pathname : location.pathname + "?map=basic";
-    a.textContent = basic ? "실사 3D 지도로 보기" : "가벼운 지도로 보기";
-    a.title = basic ? "브이월드 항공사진·3D 건물 (컴퓨터 사양이 필요)" : "느릴 때: 층수로 세운 간단한 3D 지도";
-    $("map").parentNode.appendChild(a);
+    var here = engine !== "vworld" ? "basic" : wantReal ? "real" : "box";
+    var links = {
+      box: ["", "항공사진 지도로 보기", "브이월드 항공사진 위에 층수 높이로 세운 건물 (기본)"],
+      real: ["?map=real", "실제 건물 모델 보기", "브이월드 실제 3D 건물 모델 (무거움, 컴퓨터 사양이 필요)"],
+      basic: ["?map=basic", "가벼운 지도로 보기", "느릴 때: 흑백 지도 위 층수 높이 건물"],
+    };
+    var div = document.createElement("div");
+    div.className = "engine-toggle";
+    ["box", "real", "basic"].forEach(function (k) {
+      if (k === here) return;
+      var a = document.createElement("a");
+      a.href = location.pathname + links[k][0];
+      a.textContent = links[k][1];
+      a.title = links[k][2];
+      div.appendChild(a);
+    });
+    $("map").parentNode.appendChild(div);
   }
 
   // 브이월드 지도의 건물 속성 카드
