@@ -136,6 +136,9 @@
       (function wait() {
         if (global.ws3d && ws3d.viewer && global.Cesium) {
           viewer = ws3d.viewer;
+          // 가만히 있을 때는 다시 그리지 않는다 (조작·타일 로딩·색 변경 때만 그림) → CPU/GPU 부담 감소
+          viewer.scene.requestRenderMode = true;
+          viewer.scene.maximumRenderTimeChange = Infinity;
           classify = !!(Cesium.ClassificationType && Cesium.ClassificationType.BOTH !== undefined &&
             Cesium.GroundPrimitive);
           resolve();
