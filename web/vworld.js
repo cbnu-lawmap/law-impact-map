@@ -65,7 +65,7 @@
    * 색은 인스턴스 속성만 바꾼다 (다시 만들지 않음).
    */
   function BuildingLayer(viewer, buildings, colorOf, heightOf, classify) {
-    var items = [];       // {i, poly, bbox}
+    var items = [];       // {i, id, poly, bbox}
     var instances = [];
     buildings.features.forEach(function (f) {
       var i = f.properties._i;
@@ -76,12 +76,13 @@
         );
         var geomOpts = { polygonHierarchy: hierarchy };
         if (!classify) { geomOpts.height = 0; geomOpts.extrudedHeight = heightOf(i); }
+        var id = { bldg: i, key: i + ":" + k };   // 색을 바꿀 때 같은 객체로 찾는다
         instances.push(new Cesium.GeometryInstance({
-          id: { bldg: i, key: i + ":" + k },
+          id: id,
           geometry: new Cesium.PolygonGeometry(geomOpts),
           attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(toColor(colorOf(i), FILL_ALPHA)) },
         }));
-        items.push({ i: i, key: i + ":" + k, poly: poly, bbox: bboxOf(poly) });
+        items.push({ i: i, id: id, poly: poly, bbox: bboxOf(poly) });
       });
     });
 
@@ -100,7 +101,7 @@
     this.recolor = function (colorOf2) {
       var apply = function () {
         items.forEach(function (it) {
-          var a = prim.getGeometryInstanceAttributes(it.key);
+          var a = prim.getGeometryInstanceAttributes(it.id);
           if (a) a.color = Cesium.ColorGeometryInstanceAttribute.toValue(toColor(colorOf2(it.i), FILL_ALPHA), a.color);
         });
         viewer.scene.requestRender();
