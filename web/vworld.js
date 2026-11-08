@@ -176,20 +176,31 @@
       });
 
       // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기.
-      // 브이월드가 시작 직후 카메라를 한 번 더 옮기므로, 사용자가 조작하기 전까지 몇 번 다시 맞춘다.
+      // 브이월드가 시작하고 몇 초 뒤(기기마다 다름) 카메라를 제멋대로 옮기므로,
+      // 처음 15초 동안은 사용자가 조작하기 전까지 시점이 벗어나면 다시 맞춘다.
       if (bb) {
         var cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
         var pitch = -38, h = 900;
         var back = h / Math.tan((-pitch * Math.PI) / 180) / 111000;
         var home = function () {
-          if (userMoved) return;
+          viewer.camera.cancelFlight();
           viewer.camera.setView({
             destination: Cesium.Cartesian3.fromDegrees(cx, cy - back, h),
             orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitch), roll: 0 },
           });
+          viewer.scene.requestRender();
+        };
+        var offHome = function () {
+          var c = Cesium.Cartographic.fromCartesian(viewer.camera.position);
+          return Math.abs(Cesium.Math.toDegrees(c.latitude) - (cy - back)) > 0.0005 ||
+            Math.abs(Cesium.Math.toDegrees(c.longitude) - cx) > 0.0005 || Math.abs(c.height - h) > 30;
         };
         home();
-        [800, 2000, 4000].forEach(function (ms) { setTimeout(home, ms); });
+        var guardEnd = Date.now() + 15000;
+        var guard = setInterval(function () {
+          if (userMoved || Date.now() > guardEnd) { clearInterval(guard); return; }
+          if (offHome()) home();
+        }, 300);
       }
 
       var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
