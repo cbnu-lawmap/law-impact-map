@@ -140,6 +140,14 @@
           // 가만히 있을 때는 다시 그리지 않는다 (조작·타일 로딩·색 변경 때만 그림) → CPU/GPU 부담 감소
           viewer.scene.requestRenderMode = true;
           viewer.scene.maximumRenderTimeChange = Infinity;
+          // 요청 렌더 모드에서는 위성영상·3D 타일이 다 받아져도 다시 그리지 않아 화면이 빈 채로 남는다.
+          // 타일 로딩 상태가 바뀔 때마다 한 번씩 다시 그리게 한다.
+          viewer.scene.globe.tileLoadProgressEvent.addEventListener(function () { viewer.scene.requestRender(); });
+          var warmEnd = Date.now() + 30000;
+          var warm = setInterval(function () {
+            if (Date.now() > warmEnd) { clearInterval(warm); return; }
+            viewer.scene.requestRender();
+          }, 500);
           // 휴대폰·태블릿: 화질을 조금 낮춰 부담을 줄인다 (가장자리 다듬기·안개 끄기, 지형 타일 덜 세밀하게)
           if (global.matchMedia && matchMedia("(pointer: coarse)").matches) {
             if (viewer.scene.postProcessStages.fxaa) viewer.scene.postProcessStages.fxaa.enabled = false;
@@ -177,7 +185,7 @@
 
       // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기.
       // 브이월드가 시작하고 몇 초 뒤(기기마다 다름) 카메라를 제멋대로 옮기므로,
-      // 처음 15초 동안은 사용자가 조작하기 전까지 시점이 벗어나면 다시 맞춘다.
+      // 사용자가 조작하기 전까지는 시점이 벗어나면 다시 맞춘다.
       if (bb) {
         var cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
         var pitch = -38, h = 900;
@@ -196,11 +204,15 @@
             Math.abs(Cesium.Math.toDegrees(c.longitude) - cx) > 0.0005 || Math.abs(c.height - h) > 30;
         };
         home();
-        var guardEnd = Date.now() + 15000;
+        // 느린 기기·네트워크에서는 20초 넘어서도 옮기므로, 사용자가 조작하기 전까지는 계속 되돌린다.
+        var guardEnd = Date.now() + 60000;
         var guard = setInterval(function () {
           if (userMoved || Date.now() > guardEnd) { clearInterval(guard); return; }
           if (offHome()) home();
         }, 300);
+        viewer.camera.moveEnd.addEventListener(function () {
+          if (!userMoved && offHome()) home();
+        });
       }
 
       var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
