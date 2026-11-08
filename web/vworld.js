@@ -74,7 +74,7 @@
       var map = new vw.Map();
       map.setOption({
         mapId: opts.mapId,
-        initPosition: new vw.CameraPosition(new vw.CoordZ(127.462, 36.62, 1500), new vw.Direction(0, -45, 0)),
+        initPosition: new vw.CameraPosition(new vw.CoordZ(127.462, 36.621, 900), new vw.Direction(0, -38, 0)),
         logo: true,
         navigation: true,
       });
@@ -133,12 +133,11 @@
       // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기
       if (bb) {
         var cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
-        var pitch = -40, h = 1600;
+        var pitch = -38, h = 900;
         var back = h / Math.tan((-pitch * Math.PI) / 180) / 111000;
-        viewer.camera.flyTo({
+        viewer.camera.setView({
           destination: Cesium.Cartesian3.fromDegrees(cx, cy - back, h),
           orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitch), roll: 0 },
-          duration: 0,
         });
       }
 
@@ -148,23 +147,32 @@
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
     }
 
-    // 클릭 위치의 건물 번호: 덧칠 객체를 먼저 찾고, 없으면 클릭 좌표가 들어가는 바닥면을 찾는다
+    // 클릭 위치의 건물 번호.
+    // 덧칠 영역은 위아래로 길게 서 있어 비스듬히 보면 앞 건물 영역이 뒤 건물을 가린다.
+    // 그래서 클릭한 3D 모델 지점(지붕 등)의 경위도가 들어가는 바닥면을 우선 고른다.
     function pick(pos) {
       var scene = viewer.scene;
-      var hit = scene.pick(pos);
-      if (hit && hit.id && hit.id._bldg !== undefined) return hit.id._bldg;
+      var cands = [];
+      try {
+        scene.drillPick(pos, 6).forEach(function (h) {
+          if (h && h.id && h.id._bldg !== undefined && cands.indexOf(h.id._bldg) < 0) cands.push(h.id._bldg);
+        });
+      } catch (e) { cands = []; }
+
       var cart = null;
       try { if (scene.pickPositionSupported) cart = scene.pickPosition(pos); } catch (e) { cart = null; }
       if (!cart) cart = scene.globe.pick(viewer.camera.getPickRay(pos), scene);
-      if (!cart) return null;
-      var c = Cesium.Cartographic.fromCartesian(cart);
-      var x = Cesium.Math.toDegrees(c.longitude), y = Cesium.Math.toDegrees(c.latitude);
-      for (var k = 0; k < items.length; k++) {
-        var it = items[k], b = it.bbox;
-        if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
-        if (inPolygon(x, y, it.polys[0])) return it.i;
+      if (cart) {
+        var c = Cesium.Cartographic.fromCartesian(cart);
+        var x = Cesium.Math.toDegrees(c.longitude), y = Cesium.Math.toDegrees(c.latitude);
+        var pool = cands.length ? items.filter(function (it) { return cands.indexOf(it.i) >= 0; }) : items;
+        for (var k = 0; k < pool.length; k++) {
+          var it = pool[k], b = it.bbox;
+          if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
+          if (inPolygon(x, y, it.polys[0])) return it.i;
+        }
       }
-      return null;
+      return cands.length ? cands[0] : null;
     }
 
     function recolor(colorOf) {

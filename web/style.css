@@ -176,12 +176,12 @@ h2 { margin: 0; font-size: 13px; font-weight: 700; color: var(--ink-2); }
 .legend-note { margin-top: 4px; }
 
 /* 브이월드 지도 건물 카드 */
-.vw-popup {
+.lm-popup {
   position: absolute; z-index: 2100; max-width: 260px;
   background: #fff; border-radius: 8px; padding: 10px 12px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
-.vw-popup .close {
+.lm-popup .close {
   position: absolute; top: 4px; right: 6px; border: 0; background: none;
   font-size: 16px; line-height: 1; cursor: pointer; color: var(--muted);
 }
