@@ -131,11 +131,11 @@
 
   // 브이월드 지도의 건물 속성 카드
   function showVWorldPopup(i, pos) {
-    var old = document.querySelector(".vw-popup");
+    var old = document.querySelector(".lm-popup");
     if (old) old.remove();
     if (i === null) return;
     var div = document.createElement("div");
-    div.className = "vw-popup";
+    div.className = "lm-popup";
     div.innerHTML = '<button type="button" class="close" aria-label="닫기">×</button>' + buildingCard(state.props[i]);
     $("map").parentNode.appendChild(div);
     var wrap = $("map").getBoundingClientRect();
