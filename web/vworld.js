@@ -60,14 +60,66 @@
   }
 
   /**
+   * 건물 바닥면 덧칠 레이어.
+   * 건물마다 엔티티를 만들면 2천여 개가 따로 그려져 느리므로, GeometryInstance 를 한 Primitive 로 묶고
+   * 색은 인스턴스 속성만 바꾼다 (다시 만들지 않음).
+   */
+  function BuildingLayer(viewer, buildings, colorOf, heightOf, classify) {
+    var items = [];       // {i, poly, bbox}
+    var instances = [];
+    buildings.features.forEach(function (f) {
+      var i = f.properties._i;
+      polygonsOf(f.geometry).forEach(function (poly, k) {
+        var hierarchy = new Cesium.PolygonHierarchy(
+          Cesium.Cartesian3.fromDegreesArray(flat(poly[0])),
+          poly.slice(1).map(function (h) { return new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(flat(h))); })
+        );
+        var geomOpts = { polygonHierarchy: hierarchy };
+        if (!classify) { geomOpts.height = 0; geomOpts.extrudedHeight = heightOf(i); }
+        instances.push(new Cesium.GeometryInstance({
+          id: { bldg: i, key: i + ":" + k },
+          geometry: new Cesium.PolygonGeometry(geomOpts),
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(toColor(colorOf(i), FILL_ALPHA)) },
+        }));
+        items.push({ i: i, key: i + ":" + k, poly: poly, bbox: bboxOf(poly) });
+      });
+    });
+
+    var appearance = new Cesium.PerInstanceColorAppearance({ flat: true, translucent: true });
+    var prim = classify
+      // 바닥면 색을 브이월드 3D 건물 모델과 지형에 입힌다
+      ? new Cesium.GroundPrimitive({
+          geometryInstances: instances, appearance: appearance,
+          classificationType: Cesium.ClassificationType.BOTH, releaseGeometryInstances: false,
+        })
+      // 덧칠을 지원하지 않는 버전이면 층수 높이로 세운다
+      : new Cesium.Primitive({ geometryInstances: instances, appearance: appearance, releaseGeometryInstances: false });
+    viewer.scene.primitives.add(prim);
+
+    this.items = items;
+    this.recolor = function (colorOf2) {
+      var apply = function () {
+        items.forEach(function (it) {
+          var a = prim.getGeometryInstanceAttributes(it.key);
+          if (a) a.color = Cesium.ColorGeometryInstanceAttribute.toValue(toColor(colorOf2(it.i), FILL_ALPHA), a.color);
+        });
+        viewer.scene.requestRender();
+      };
+      if (prim.ready) apply(); else prim.readyPromise ? prim.readyPromise.then(apply) : setTimeout(apply, 500);
+    };
+    this.destroy = function () { viewer.scene.primitives.remove(prim); };
+  }
+
+  /**
    * opts.mapId   지도 div 아이디
    * opts.onPick  function(index | null, {x, y}) 건물 클릭 시
-   * 반환: { ready: Promise, add(buildings, boundary), recolor(colorOf) }
+   * 반환: { ready: Promise, add(buildings, boundary, colorOf, heightOf), recolor(colorOf) }
    */
   function create(opts) {
     var viewer = null;
-    var items = [];   // {i, entity, polys, bbox}
+    var layer = null;
     var classify = false;
+    var userMoved = false;
 
     var ready = new Promise(function (resolve, reject) {
       if (!global.vw || !global.vw.Map) { reject(new Error("브이월드 API를 불러오지 못함")); return; }
@@ -83,7 +135,8 @@
       (function wait() {
         if (global.ws3d && ws3d.viewer && global.Cesium) {
           viewer = ws3d.viewer;
-          classify = !!(Cesium.ClassificationType && Cesium.ClassificationType.BOTH !== undefined);
+          classify = !!(Cesium.ClassificationType && Cesium.ClassificationType.BOTH !== undefined &&
+            Cesium.GroundPrimitive);
           resolve();
         } else if (Date.now() - t0 > READY_TIMEOUT_MS) {
           reject(new Error("브이월드 3D 지도 시작 시간 초과"));
@@ -92,28 +145,7 @@
     });
 
     function add(buildings, boundary, colorOf, heightOf) {
-      buildings.features.forEach(function (f) {
-        var i = f.properties._i;
-        var polys = polygonsOf(f.geometry);
-        polys.forEach(function (poly) {
-          var hierarchy = new Cesium.PolygonHierarchy(
-            Cesium.Cartesian3.fromDegreesArray(flat(poly[0])),
-            poly.slice(1).map(function (h) { return new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(flat(h))); })
-          );
-          var pg = { hierarchy: hierarchy, material: toColor(colorOf(i), FILL_ALPHA) };
-          if (classify) {
-            // 바닥면 색을 브이월드 3D 건물 모델과 지형에 입힌다
-            pg.classificationType = Cesium.ClassificationType.BOTH;
-          } else {
-            // 덧칠을 지원하지 않는 버전이면 층수 높이로 세운다
-            pg.height = 0;
-            pg.extrudedHeight = heightOf(i);
-          }
-          var e = viewer.entities.add({ polygon: pg });
-          e._bldg = i;
-          items.push({ i: i, entity: e, polys: [poly], bbox: bboxOf(poly) });
-        });
-      });
+      layer = new BuildingLayer(viewer, buildings, colorOf, heightOf, classify);
 
       var bb = null;
       boundary.features.forEach(function (f) {
@@ -130,18 +162,28 @@
         });
       });
 
-      // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기
+      // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기.
+      // 브이월드가 시작 직후 카메라를 한 번 더 옮기므로, 사용자가 조작하기 전까지 몇 번 다시 맞춘다.
       if (bb) {
         var cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
         var pitch = -38, h = 900;
         var back = h / Math.tan((-pitch * Math.PI) / 180) / 111000;
-        viewer.camera.setView({
-          destination: Cesium.Cartesian3.fromDegrees(cx, cy - back, h),
-          orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitch), roll: 0 },
-        });
+        var home = function () {
+          if (userMoved) return;
+          viewer.camera.setView({
+            destination: Cesium.Cartesian3.fromDegrees(cx, cy - back, h),
+            orientation: { heading: 0, pitch: Cesium.Math.toRadians(pitch), roll: 0 },
+          });
+        };
+        home();
+        [800, 2000, 4000].forEach(function (ms) { setTimeout(home, ms); });
       }
 
       var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      var moved = function () { userMoved = true; };
+      [Cesium.ScreenSpaceEventType.LEFT_DOWN, Cesium.ScreenSpaceEventType.RIGHT_DOWN,
+        Cesium.ScreenSpaceEventType.MIDDLE_DOWN, Cesium.ScreenSpaceEventType.WHEEL,
+        Cesium.ScreenSpaceEventType.PINCH_START].forEach(function (t) { handler.setInputAction(moved, t); });
       handler.setInputAction(function (ev) {
         opts.onPick(pick(ev.position), { x: ev.position.x, y: ev.position.y });
       }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
@@ -151,11 +193,12 @@
     // 덧칠 영역은 위아래로 길게 서 있어 비스듬히 보면 앞 건물 영역이 뒤 건물을 가린다.
     // 그래서 클릭한 3D 모델 지점(지붕 등)의 경위도가 들어가는 바닥면을 우선 고른다.
     function pick(pos) {
+      if (!layer) return null;
       var scene = viewer.scene;
       var cands = [];
       try {
         scene.drillPick(pos, 6).forEach(function (h) {
-          if (h && h.id && h.id._bldg !== undefined && cands.indexOf(h.id._bldg) < 0) cands.push(h.id._bldg);
+          if (h && h.id && h.id.bldg !== undefined && cands.indexOf(h.id.bldg) < 0) cands.push(h.id.bldg);
         });
       } catch (e) { cands = []; }
 
@@ -165,24 +208,20 @@
       if (cart) {
         var c = Cesium.Cartographic.fromCartesian(cart);
         var x = Cesium.Math.toDegrees(c.longitude), y = Cesium.Math.toDegrees(c.latitude);
-        var pool = cands.length ? items.filter(function (it) { return cands.indexOf(it.i) >= 0; }) : items;
+        var pool = cands.length ? layer.items.filter(function (it) { return cands.indexOf(it.i) >= 0; }) : layer.items;
         for (var k = 0; k < pool.length; k++) {
           var it = pool[k], b = it.bbox;
           if (x < b[0] || x > b[2] || y < b[1] || y > b[3]) continue;
-          if (inPolygon(x, y, it.polys[0])) return it.i;
+          if (inPolygon(x, y, it.poly)) return it.i;
         }
       }
       return cands.length ? cands[0] : null;
     }
 
-    function recolor(colorOf) {
-      items.forEach(function (it) {
-        it.entity.polygon.material = toColor(colorOf(it.i), FILL_ALPHA);
-      });
-    }
+    function recolor(colorOf) { if (layer) layer.recolor(colorOf); }
 
     return { ready: ready, add: add, recolor: recolor, classify: function () { return classify; } };
   }
 
-  global.VWorldMap = { create: create };
+  global.VWorldMap = { create: create, BuildingLayer: BuildingLayer };
 })(this);
