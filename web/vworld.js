@@ -9,7 +9,8 @@
   "use strict";
 
   var READY_TIMEOUT_MS = 20000;
-  var FILL_ALPHA = 0.7;
+  var FILL_ALPHA = 0.7;   // 실제 건물 모델 위 덧칠
+  var BOX_ALPHA = 0.8;    // 상자 건물
 
   function toColor(c, a) {
     var r, g, b;
@@ -67,6 +68,9 @@
   function BuildingLayer(viewer, buildings, colorOf, heightOf, classify) {
     var items = [];       // {i, id, poly, bbox}
     var instances = [];
+    // 덧칠은 평면색, 상자 건물은 빛을 받아 면이 구분되게(입체감) 그린다
+    var appearance = new Cesium.PerInstanceColorAppearance({ flat: classify, translucent: true });
+    var alpha = classify ? FILL_ALPHA : BOX_ALPHA;
     buildings.features.forEach(function (f) {
       var i = f.properties._i;
       polygonsOf(f.geometry).forEach(function (poly, k) {
@@ -74,26 +78,25 @@
           Cesium.Cartesian3.fromDegreesArray(flat(poly[0])),
           poly.slice(1).map(function (h) { return new Cesium.PolygonHierarchy(Cesium.Cartesian3.fromDegreesArray(flat(h))); })
         );
-        var geomOpts = { polygonHierarchy: hierarchy };
+        var geomOpts = { polygonHierarchy: hierarchy, vertexFormat: appearance.vertexFormat };
         if (!classify) { geomOpts.height = 0; geomOpts.extrudedHeight = heightOf(i); }
         var id = { bldg: i, key: i + ":" + k };   // 색을 바꿀 때 같은 객체로 찾는다
         instances.push(new Cesium.GeometryInstance({
           id: id,
           geometry: new Cesium.PolygonGeometry(geomOpts),
-          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(toColor(colorOf(i), FILL_ALPHA)) },
+          attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(toColor(colorOf(i), alpha)) },
         }));
         items.push({ i: i, id: id, poly: poly, bbox: bboxOf(poly) });
       });
     });
 
-    var appearance = new Cesium.PerInstanceColorAppearance({ flat: true, translucent: true });
     var prim = classify
       // 바닥면 색을 브이월드 3D 건물 모델과 지형에 입힌다
       ? new Cesium.GroundPrimitive({
           geometryInstances: instances, appearance: appearance,
           classificationType: Cesium.ClassificationType.BOTH, releaseGeometryInstances: false,
         })
-      // 덧칠을 지원하지 않는 버전이면 층수 높이로 세운다
+      // 상자 건물: 층수 높이로 세운다 (기본 방식, 또는 덧칠을 지원하지 않는 버전)
       : new Cesium.Primitive({ geometryInstances: instances, appearance: appearance, releaseGeometryInstances: false });
     viewer.scene.primitives.add(prim);
 
@@ -102,7 +105,7 @@
       var apply = function () {
         items.forEach(function (it) {
           var a = prim.getGeometryInstanceAttributes(it.id);
-          if (a) a.color = Cesium.ColorGeometryInstanceAttribute.toValue(toColor(colorOf2(it.i), FILL_ALPHA), a.color);
+          if (a) a.color = Cesium.ColorGeometryInstanceAttribute.toValue(toColor(colorOf2(it.i), alpha), a.color);
         });
         viewer.scene.requestRender();
       };
@@ -115,6 +118,8 @@
    * opts.mapId   지도 div 아이디
    * opts.onPick  function(index | null, {x, y}) 건물 클릭 시
    * opts.onMove  function() 지도를 움직이기 시작할 때
+   * opts.realModels  true 면 브이월드 실제 3D 건물 모델 위에 색을 덧칠 (무거움).
+   *                  기본(false)은 실제 건물·지형을 끄고 항공사진 위에 층수 높이 상자 건물만 세운다 (가벼움).
    * 반환: { ready: Promise, add(buildings, boundary, colorOf, heightOf), recolor(colorOf) }
    */
   function create(opts) {
@@ -140,6 +145,14 @@
           // 가만히 있을 때는 다시 그리지 않는다 (조작·타일 로딩·색 변경 때만 그림) → CPU/GPU 부담 감소
           viewer.scene.requestRenderMode = true;
           viewer.scene.maximumRenderTimeChange = Infinity;
+          // 요청 렌더 모드에서는 위성영상·3D 타일이 다 받아져도 다시 그리지 않아 화면이 빈 채로 남는다.
+          // 타일 로딩 상태가 바뀔 때마다 한 번씩 다시 그리게 한다.
+          viewer.scene.globe.tileLoadProgressEvent.addEventListener(function () { viewer.scene.requestRender(); });
+          var warmEnd = Date.now() + 30000;
+          var warm = setInterval(function () {
+            if (Date.now() > warmEnd) { clearInterval(warm); return; }
+            viewer.scene.requestRender();
+          }, 500);
           // 휴대폰·태블릿: 화질을 조금 낮춰 부담을 줄인다 (가장자리 다듬기·안개 끄기, 지형 타일 덜 세밀하게)
           if (global.matchMedia && matchMedia("(pointer: coarse)").matches) {
             if (viewer.scene.postProcessStages.fxaa) viewer.scene.postProcessStages.fxaa.enabled = false;
@@ -148,14 +161,44 @@
           }
           // 지도를 움직이기 시작하면 건물 카드를 닫는다 (카드가 엉뚱한 곳에 남지 않게)
           viewer.camera.moveStart.addEventListener(function () { if (opts.onMove) opts.onMove(); });
-          classify = !!(Cesium.ClassificationType && Cesium.ClassificationType.BOTH !== undefined &&
-            Cesium.GroundPrimitive);
+          classify = !!(opts.realModels && Cesium.ClassificationType &&
+            Cesium.ClassificationType.BOTH !== undefined && Cesium.GroundPrimitive);
+          if (!opts.realModels) {
+            // 실제 건물 모델은 계속 새 조각을 받아 그려야 해서 무겁다 → 끄고, 지형도 평평하게(높이 0) 둔다.
+            // 브이월드가 나중에 모델·지형을 다시 넣을 수 있어 한동안, 그리고 카메라 이동이 끝날 때마다 다시 끈다.
+            lightMode();
+            var lightEnd = Date.now() + 60000;
+            var light = setInterval(function () {
+              if (Date.now() > lightEnd) { clearInterval(light); return; }
+              lightMode();
+            }, 500);
+            viewer.camera.moveEnd.addEventListener(lightMode);
+          }
           resolve();
         } else if (Date.now() - t0 > READY_TIMEOUT_MS) {
           reject(new Error("브이월드 3D 지도 시작 시간 초과"));
         } else setTimeout(wait, 200);
       })();
     });
+
+    function hideModels(col) {
+      var changed = false;
+      for (var i = 0; i < col.length; i++) {
+        var p = col.get(i);
+        if (p instanceof Cesium.Cesium3DTileset) { if (p.show) { p.show = false; changed = true; } }
+        else if (p instanceof Cesium.PrimitiveCollection && hideModels(p)) changed = true;
+      }
+      return changed;
+    }
+
+    function lightMode() {
+      var changed = hideModels(viewer.scene.primitives);
+      if (!(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)) {
+        viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+        changed = true;
+      }
+      if (changed) viewer.scene.requestRender();
+    }
 
     function add(buildings, boundary, colorOf, heightOf) {
       layer = new BuildingLayer(viewer, buildings, colorOf, heightOf, classify);
@@ -177,7 +220,7 @@
 
       // 동 경계 남쪽에서 북쪽을 비스듬히 내려다보기.
       // 브이월드가 시작하고 몇 초 뒤(기기마다 다름) 카메라를 제멋대로 옮기므로,
-      // 처음 15초 동안은 사용자가 조작하기 전까지 시점이 벗어나면 다시 맞춘다.
+      // 사용자가 조작하기 전까지는 시점이 벗어나면 다시 맞춘다.
       if (bb) {
         var cx = (bb[0] + bb[2]) / 2, cy = (bb[1] + bb[3]) / 2;
         var pitch = -38, h = 900;
@@ -196,11 +239,15 @@
             Math.abs(Cesium.Math.toDegrees(c.longitude) - cx) > 0.0005 || Math.abs(c.height - h) > 30;
         };
         home();
-        var guardEnd = Date.now() + 15000;
+        // 느린 기기·네트워크에서는 20초 넘어서도 옮기므로, 사용자가 조작하기 전까지는 계속 되돌린다.
+        var guardEnd = Date.now() + 60000;
         var guard = setInterval(function () {
           if (userMoved || Date.now() > guardEnd) { clearInterval(guard); return; }
           if (offHome()) home();
         }, 300);
+        viewer.camera.moveEnd.addEventListener(function () {
+          if (!userMoved && offHome()) home();
+        });
       }
 
       var handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
