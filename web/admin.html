@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>빼곡 · 행정 화면</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="stylesheet" href="admin.css" />
+</head>
+<body>
+  <div class="demo-banner no-print">시연용 공개 화면 · 도입 시 행정망 내부 전용 · 로그인 없이 누구나 볼 수 있습니다</div>
+
+  <header class="bar no-print">
+    <a class="brand" href="#/">빼곡 <span>행정 화면</span></a>
+    <div class="bar-right">
+      <span class="chip">청주시 서원구 사창동 · 건물 <b id="bldg-total">2,448</b>동</span>
+      <a class="btn ghost" href="index.html">지도로 돌아가기</a>
+    </div>
+  </header>
+
+  <div class="shell">
+    <nav class="side no-print" id="nav">
+      <a href="#/" data-route="home"><b>상황판</b><small>지금 무엇을 봐야 하나</small></a>
+      <a href="#/bills" data-route="bills"><b>법안 검토 목록</b><small>어느 법안이 우리 동네에 큰가</small></a>
+      <a href="#/sources" data-route="sources"><b>데이터·한계</b><small>믿을 만한가</small></a>
+      <p class="side-note">판정 결과는 건축물 데이터 기반 추정이며 법률 판단이 아닙니다.
+        소유자 등 개인정보를 수집하지 않습니다.</p>
+    </nav>
+    <main id="view" class="view" aria-live="polite"><p class="muted">불러오는 중…</p></main>
+  </div>
+
+  <script src="judge.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>

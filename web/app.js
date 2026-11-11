@@ -475,6 +475,10 @@
     renderLegend();
     selfCheck();
 
+    // 행정 화면의 "지도에서 보기"(?bill=번호)로 들어오면 그 법안을 골라 둔다
+    var want = location.search.match(/[?&]bill=(\d+)/);
+    if (want && state.bills.some(function (b) { return b.no === want[1]; })) select(want[1]);
+
     return startMap(bnd);
   }).catch(function (err) {
     console.error(err);
