@@ -5,18 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>빼곡 · 이 법 통과되면 우리 동네 몇 채?</title>
   <meta name="description" content="국회 계류 법안의 적용 기준을 건물 데이터와 대조해 영향받는 건물을 지도에 표시하는 시제품 (청주시 사창동)" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="preload" href="fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
   <header class="top">
-    <div class="brand">
-      <h1>빼곡</h1>
-      <p class="sub">이 법 통과되면 우리 동네 몇 채?</p>
-    </div>
+    <a class="brand" href="index.html" aria-label="빼곡 지도 처음으로">
+      <img class="brand-mark" src="logo.svg" alt="" width="22" height="22" />
+      <span class="wordmark">빼곡</span>
+    </a>
+    <nav class="page-tabs" aria-label="화면 이동">
+      <a href="index.html" aria-current="page">지도</a>
+      <a href="admin.html" title="법안 검토 목록 · 법안별 집계 · 검토서 인쇄">행정 화면</a>
+    </nav>
+    <p class="tagline">이 법 통과되면 우리 동네 몇 채?</p>
     <div class="top-right">
-      <div class="region"><span class="dot"></span>시범 지역 · 청주시 서원구 <b>사창동</b> <span class="muted" id="bldg-total"></span></div>
-      <a class="admin-link" href="admin.html" title="법안 검토 목록 · 법안별 집계 · 검토서 인쇄">행정 화면</a>
+      <span class="region-chip" title="시범 지역"><i class="dot" aria-hidden="true"></i><span>청주시 서원구 사창동 · 건물 <b id="bldg-total">2,448</b>동</span></span>
     </div>
   </header>
 

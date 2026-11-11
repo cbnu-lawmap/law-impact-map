@@ -4,7 +4,7 @@
  * 사각119·온지붕·필지 블랙박스의 행정 화면 구성을 법안 검토 업무에 맞게 옮겼다.
  *   - 역할(법안 검토 담당 / 결재·관리 / 관내 총괄): 첫 화면과 상황판 카드만 바꿈. 권한 차이 없음
  *   - 모드(실무 / 심사·검증): 심사 모드에서 판정 규칙·검증과 원본 규칙을 함께 보임 ("숨기되 지우지 않는다")
- *   - 진행 현황(○ 미검토 / ◐ 검토 중 / ⊘ 보류 / ● 검토 완료), 메모, 처리 이력, 일괄 변경, CSV 내보내기·가져오기
+ *   - 진행 현황(미검토 / 검토 중 / 보류 / 검토 완료, 모양·색·글자 배지), 메모, 처리 이력, 일괄 변경, CSV 내보내기·가져오기
  *   - 건물 확인 기록(맞음 / 아님 / 확인 불가)과 적중률
  *   - 검토서 인쇄(A4)·한글(HWPX) 내려받기, 하단 상태 바, 둘러보기, 질의 도우미(AI)
  *
@@ -14,6 +14,9 @@
  *
  * 로그인·서버 저장이 없다. 진행 기록은 이 브라우저(localStorage)에만 남고, 담당자끼리는 CSV로 주고받는다.
  * 질의 도우미만 별도 서버(server/api/ask.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
+ * 설정에서 질의 도우미를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
+ *
+ * 화면 찍기용: 주소에 ?shot=1 을 붙이면 역할 고르기 창·둘러보기를 띄우지 않고, 아무것도 저장하지 않는다.
  */
 (function () {
   "use strict";
@@ -21,11 +24,12 @@
   var ASK_URL = "https://ppaegok-api.vercel.app/api/ask";
   var STATUSES = Judge.STATUSES; // 대상, 경계선, 비대상, 판정불가
   var PAGE = 50;
+  // 진행 상태. 화면에서는 모양(빈 원·반쪽 원·마름모·꽉 찬 원)+색+글자 배지로 보인다 (admin.css .pg-*)
   var PG = {
-    todo: { label: "미검토", mark: "○" },
-    doing: { label: "검토 중", mark: "◐" },
-    hold: { label: "보류", mark: "⊘" },
-    done: { label: "검토 완료", mark: "●" },
+    todo: { label: "미검토" },
+    doing: { label: "검토 중" },
+    hold: { label: "보류" },
+    done: { label: "검토 완료" },
   };
   var PG_KEYS = ["todo", "doing", "hold", "done"];
   var CHECK = { yes: "맞음", no: "아님", unk: "확인 불가" };
@@ -46,6 +50,8 @@
     "28000": "장례시설",
   };
   // 메모에 넣으면 안 되는 개인정보 (전화번호·주민등록번호·이메일)
+  var CONF_LOW = 0.6;   // 자동 분야 분류 확신도가 이보다 낮으면 "분류 확인 필요"
+  var SHOT = /[?&]shot=1(&|$)/.test(location.search);
   var PII = /(01[016789][-\s]?\d{3,4}[-\s]?\d{4})|(\d{6}[-\s]?[1-4]\d{6})|([\w.+-]+@[\w-]+\.[\w.]+)/;
 
   var D = { fields: {}, bills: [], byNo: {}, demos: {}, region: "", total: 0, props: null, judged: {} };
@@ -60,11 +66,13 @@
     try { var v = localStorage.getItem("ppaegok." + key); return v ? JSON.parse(v) : def; } catch (e) { return def; }
   }
   function save(key, val) {
+    if (SHOT) return; // 화면 찍기용: 저장하지 않음
     try { localStorage.setItem("ppaegok." + key, JSON.stringify(val)); } catch (e) { /* 저장 불가(사생활 보호 모드 등) */ }
   }
   var progress = load("progress", {});   // { 번호: { s, memo, t, log: [[시각, 내용]] } }
   var checks = load("checks", {});       // { 번호: { pnu: yes|no|unk } }
-  var prefs = load("prefs", { role: "", mode: "work", toured: false, dept: "", writer: "" });
+  var prefs = load("prefs", { role: "", mode: "work", toured: false, dept: "", writer: "", ai: true });
+  if (prefs.ai === undefined) prefs.ai = true; // 예전 저장값: 질의 도우미 켜짐
 
   function pgOf(no) { return (progress[no] && progress[no].s) || "todo"; }
   function setPg(no, s, note) {
@@ -78,10 +86,8 @@
     save("progress", progress);
     drawSideProgress();
   }
-  function pgMark(no) {
-    var s = pgOf(no);
-    return '<span class="pg pg-' + s + '">' + PG[s].mark + " " + PG[s].label + "</span>";
-  }
+  function pgBadge(s) { return '<span class="pg pg-' + s + '">' + PG[s].label + "</span>"; }
+  function pgMark(no) { return pgBadge(pgOf(no)); }
 
   // ---------------------------------------------------------------- 도구
   function esc(s) {
@@ -109,6 +115,13 @@
     return (USE_NAMES[code] || "코드") + " " + code;
   }
   function fieldName(f) { return f == null ? "미분류" : D.fields[f] || "미분류"; }
+  // 자동 분류는 숫자(확신도)를 보이지 않고, 낮을 때만 "분류 확인 필요"를 붙인다
+  function lowConf(b) { return b.conf != null && b.conf < CONF_LOW; }
+  function fieldTag(b) {
+    return '<span class="tag" title="법안 내용으로 자동 분류한 분야">' + esc(fieldName(b.field)) + ' <span class="sub">자동 분류</span></span>' +
+      (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>' : "");
+  }
+  function fieldText(b) { return fieldName(b.field) + " (자동 분류" + (lowConf(b) ? " · 분류 확인 필요" : "") + ")"; }
   function getJSON(url) {
     return fetch(url).then(function (r) {
       if (!r.ok) throw new Error(url + " " + r.status);
@@ -235,7 +248,7 @@
         act = "시행령 위임 기준(" + d.rule.위임.join("·") + ") 확인 후 후보 재판정";
         from = d.candidates_2f_plus ? "판정불가 후보 " + fmt(d.candidates_2f_plus) + "동" : "판정불가 탭";
       } else { act = "대상 0동 확인 → 검토서로 종결"; from = d.conclusion; }
-      out.push({ no: no, name: b ? b.name : no, score: hit * 1000 + (deleg ? 500 : 0) + 100, act: act, why: why, from: from,
+      out.push({ no: no, name: d.title || (b ? b.name : no), score: hit * 1000 + (deleg ? 500 : 0) + 100, act: act, why: why, from: from,
         basis: d.source_text, judged: true });
     });
     var pri = { 3: 3, 1: 3, 5: 2, 7: 2, 2: 1 };
@@ -281,16 +294,18 @@
       ],
     }[role];
 
-    var html = '<h2>상황판</h2><p class="lead">' + esc(D.region) + " 기준 · " + esc(ROLES[role].label) +
-      " 화면 · 국회 계류 법안이 우리 동네 건물에 미치는 영향</p>";
+    var html = '<p class="eyebrow">' + esc(ROLES[role].label) + ' 화면</p><h2>상황판</h2><p class="lead">' + esc(D.region) +
+      " 기준 · 국회 계류 법안이 우리 동네 건물에 미치는 영향</p>";
+    html += headline(judgedNos, judgedDone);
     html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
 
-    html += '<h3 id="todo-h">지금 할 일 <span class="muted small" style="font-weight:400">— 점수는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
+    html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
-        return '<div class="todo"><div class="head"><span class="rank">' + (i + 1) + "</span><b>" + esc(t.name) + "</b></div>" +
-          "<dl><dt>지금 할 일</dt><dd>" + esc(t.act) + "</dd><dt>왜</dt><dd>" + esc(t.why) + "</dd><dt>어디부터</dt><dd>" + esc(t.from) +
-          "</dd><dt>근거</dt><dd>" + esc(String(t.basis).slice(0, 60)) + (String(t.basis).length > 60 ? "…" : "") + "</dd></dl>" +
-          '<div class="foot"><span>' + esc(t.no) + " · " + pgMark(t.no) + '</span><a href="#/bill/' + t.no + '">법안 열기 →</a></div></div>';
+        return '<article class="todo"><div class="top-line"><span class="rank">' + (i + 1) + "순위</span>" + pgMark(t.no) + "</div>" +
+          '<p class="act">' + esc(t.act) + "</p>" +
+          '<ul class="facts"><li><span>법안</span><b>' + esc(t.name) + "</b></li><li><span>사창동</span>" + esc(t.why) + "</li></ul>" +
+          "<details><summary>근거 보기</summary><p><b>어디부터</b> " + esc(t.from) + "</p><p><b>근거</b> " + esc(t.basis) + "</p></details>" +
+          '<div class="foot"><span>의안 ' + esc(t.no) + '</span><a class="btn ghost" href="#/bill/' + t.no + '">법안 열기</a></div></article>';
       }).join("") + "</div>";
 
     html += "<h3>판정한 법안</h3>";
@@ -329,6 +344,33 @@
     $view.querySelectorAll("a[data-field]").forEach(function (a) {
       a.addEventListener("click", function () { ui.bills.field = a.getAttribute("data-field"); ui.bills.page = 0; });
     });
+  }
+
+  // 상황판 맨 위 한 문장: 판정한 법안 가운데 대상+경계선이 가장 많은 법안 (모두 0이면 그대로 말한다)
+  function headline(judgedNos, judgedDone) {
+    var todo = judgedNos.length - judgedDone;
+    var best = null, most = null;
+    judgedNos.forEach(function (no) {
+      var c = D.demos[no].counts, hit = c.대상 + c.경계선;
+      if (!best || hit > best.hit) best = { no: no, hit: hit };
+      if (!most || c.판정불가 > most.n) most = { no: no, n: c.판정불가 };
+    });
+    var name = function (no) { return D.demos[no].title || (D.byNo[no] ? D.byNo[no].name : no); };
+    var main, sub;
+    if (!judgedNos.length) {
+      main = "아직 판정한 법안이 없습니다";
+      sub = "계류 법안 " + fmt(D.bills.length) + "건은 적용 기준 추출을 기다리고 있습니다.";
+    } else if (best.hit > 0) {
+      main = "검토할 법안 <em>" + fmt(todo) + "건</em> · " + esc(D.region) + "에서 가장 큰 영향은 " + esc(name(best.no)) +
+        " <em>" + fmt(best.hit) + "동</em>";
+      sub = "대상·경계선 합계 기준 · 판정한 법안 " + fmt(judgedNos.length) + "건 중";
+    } else {
+      main = "검토할 법안 <em>" + fmt(todo) + "건</em> · 판정한 " + fmt(judgedNos.length) + "건 모두 " + esc(D.region) + " 대상·경계선 <em>0동</em>";
+      sub = most && most.n
+        ? "다만 「" + esc(name(most.no)) + "」은 판정불가 후보가 " + fmt(most.n) + "동이라 시행령·속성 확인이 필요합니다."
+        : "영향 건물이 없다는 결론을 검토서로 남기면 됩니다.";
+    }
+    return '<div class="headline" role="status"><div><p>' + main + "</p><small>" + sub + "</small></div></div>";
   }
 
   function kpi(label, value, sub, alert) {
@@ -381,7 +423,7 @@
       '<select id="f-status"><option value="">판정 전체</option><option value="done"' + (s.status === "done" ? " selected" : "") +
       '>판정한 법안</option><option value="wait"' + (s.status === "wait" ? " selected" : "") + ">기준 추출 대기</option></select>" +
       '<select id="f-pg"><option value="">진행 전체</option>' + PG_KEYS.map(function (k) {
-        return '<option value="' + k + '"' + (s.pg === k ? " selected" : "") + ">" + PG[k].mark + " " + PG[k].label + "</option>";
+        return '<option value="' + k + '"' + (s.pg === k ? " selected" : "") + ">" + PG[k].label + "</option>";
       }).join("") + "</select>" +
       '<span class="spacer"></span><span class="muted small" id="f-count"></span>' +
       '<button type="button" class="btn ghost" id="f-csv">CSV 내려받기</button></div>' +
@@ -399,10 +441,10 @@
     });
     document.getElementById("f-csv").addEventListener("click", function () {
       downloadCSV("빼곡_법안검토목록_" + stamp() + ".csv",
-        ["의안번호", "법안명", "소관위원회", "제안일", "분야(자동 분류)", "분류 확신도", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
+        ["의안번호", "법안명", "소관위원회", "제안일", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
-          return [b.no, b.name, b.committee, b.date, fieldName(b.field), b.conf, d ? "판정함" : "기준 추출 대기"]
+          return [b.no, b.name, b.committee, b.date, fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
             .concat([PG[pgOf(b.no)].label, b.link]);
         }));
@@ -416,7 +458,7 @@
     if (!box) return;
     box.innerHTML = n
       ? "<b>" + fmt(n) + "건 선택</b> → " + PG_KEYS.map(function (k) {
-        return '<button type="button" class="btn ghost" data-bulk="' + k + '">' + PG[k].mark + " " + PG[k].label + "</button>";
+        return '<button type="button" class="btn ghost" data-bulk="' + k + '">' + pgBadge(k) + "</button>";
       }).join("") + '<button type="button" class="linkish" data-bulk="clear">선택 해제</button>'
       : '<span class="muted small">왼쪽 칸을 체크하면 진행 상태를 한꺼번에 바꿀 수 있습니다.</span>';
     box.querySelectorAll("[data-bulk]").forEach(function (b) {
@@ -450,7 +492,8 @@
         : '<span class="tag wait">기준 추출 대기</span>';
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
-        '</td><td class="num">' + esc(b.date) + "</td><td>" + esc(fieldName(b.field)) + "</td><td>" + impact + "</td><td>" + pgMark(b.no) + "</td></tr>";
+        '</td><td class="num">' + esc(b.date) + "</td><td>" + esc(fieldName(b.field)) +
+        (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + "</td><td>" + pgMark(b.no) + "</td></tr>";
     }).join("") || '<tr><td colspan="8" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
     html += "</tbody></table>" + pager(s.page, pages, list.length);
     var box = document.getElementById("bill-table");
@@ -496,19 +539,19 @@
   function billHead(b) {
     return '<div class="crumb no-print"><a href="#/bills">← 법안 검토 목록</a></div>' +
       "<h2>" + esc(b.name) + '</h2><p class="lead">의안번호 ' + esc(b.no) + " · " + esc(b.committee) + " · 제안 " + esc(b.date) +
-      ' · <span class="tag">' + esc(fieldName(b.field)) + "</span> · " + pgMark(b.no) + "</p>";
+      " · " + fieldTag(b) + " · " + pgMark(b.no) + "</p>";
   }
 
   // 진행 상태 · 메모 · 처리 이력 (필지 블랙박스 사건 이력, 사각119 인계 메모)
   function progressBox(no) {
     var p = progress[no] || { s: "todo", memo: "", log: [] };
     return '<div class="card no-print" id="pg-card" style="margin-bottom:16px"><div class="pg-box"><div>' +
-      '<div class="muted small" style="margin-bottom:6px">진행 상태</div><div class="pg-pick">' +
+      '<div class="field-label">진행 상태</div><div class="pg-pick">' +
       PG_KEYS.map(function (k) {
-        return '<button type="button" data-pg="' + k + '"' + (p.s === k ? ' class="on"' : "") + ">" + PG[k].mark + " " + PG[k].label + "</button>";
+        return '<button type="button" data-pg="' + k + '"' + (p.s === k ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + pgBadge(k) + "</button>";
       }).join("") + "</div>" +
       (p.t ? '<div class="muted small" style="margin-top:6px">마지막 변경 ' + when(p.t) + "</div>" : "") +
-      '</div><div><div class="muted small" style="margin-bottom:6px">인계 메모 (300자) — <b>이름·연락처·주소 등 개인정보를 넣지 마세요</b></div>' +
+      '</div><div><div class="field-label">인계 메모 (300자) — <b>이름·연락처·주소 등 개인정보를 넣지 마세요</b></div>' +
       '<textarea class="memo" id="pg-memo" maxlength="300" placeholder="예: 시행령 입법예고 나오면 용도 기준 다시 확인">' + esc(p.memo || "") + "</textarea>" +
       '<div class="pii-warn" id="pg-warn"></div>' +
       ((p.log && p.log.length) ? '<ul class="log">' + p.log.slice().reverse().map(function (l) {
@@ -543,7 +586,7 @@
     var rerender = function () { viewBill(no); };
     var links = '<div class="toolbar no-print"><a class="btn ghost" href="index.html?bill=' + no + '">지도에서 보기</a>' +
       '<a class="btn ghost" href="' + esc(b.link) + '" target="_blank" rel="noopener">의안정보시스템 원문</a>' +
-      '<button type="button" class="btn ghost" id="ask-this">이 법안 질문하기</button>' +
+      '<button type="button" class="btn ghost ai-only" id="ask-this">이 법안 질문하기</button>' +
       (demo ? '<a class="btn" href="#/print/' + no + '">검토서 인쇄·한글</a>' : "") + "</div>";
 
     if (!demo) {
@@ -614,8 +657,7 @@
     return '<table class="dt"><thead><tr><th>판정</th><th>사유</th><th class="num">동수</th></tr></thead><tbody>' +
       sortedReasons(J).map(function (k) {
         var p = k.split("|");
-        return '<tr><td><span class="sbar" style="display:inline-block;width:10px;min-width:0;height:10px;vertical-align:middle"><i class="s-' +
-          p[0] + '" style="width:100%"></i></span> ' + esc(p[0]) + "</td><td>" + esc(p[1]) + '</td><td class="num">' + fmt(J.reasons[k]) + "</td></tr>";
+        return '<tr><td style="white-space:nowrap"><i class="sw s-' + p[0] + '" aria-hidden="true"></i>' + esc(p[0]) + "</td><td>" + esc(p[1]) + '</td><td class="num">' + fmt(J.reasons[k]) + "</td></tr>";
       }).join("") + "</tbody></table>";
   }
 
@@ -682,11 +724,10 @@
       if (location.hash !== "#/print/" + no) return;
       var R = reviewData(no), J = R.J;
       var blank = function (v) { return v ? esc(v) : "○○○"; };
-      var inputStyle = "font:inherit;padding:4px 8px;border:1px solid var(--line);border-radius:6px";
 
       var html = '<div class="print-tools no-print"><a href="#/bill/' + no + '">← 법안으로</a><span style="flex:1"></span>' +
-        '<label class="small">담당 부서 <input id="p-dept" value="' + esc(prefs.dept) + '" placeholder="예: 건축과" style="' + inputStyle + '"></label>' +
-        '<label class="small">작성자 직위 <input id="p-writer" value="' + esc(prefs.writer) + '" placeholder="예: 주무관" style="' + inputStyle + '"></label>' +
+        '<label class="small">담당 부서 <input id="p-dept" value="' + esc(prefs.dept) + '" placeholder="예: 건축과"></label>' +
+        '<label class="small">작성자 직위 <input id="p-writer" value="' + esc(prefs.writer) + '" placeholder="예: 주무관"></label>' +
         '<button type="button" class="btn ghost" id="p-hwpx">한글(HWPX) 내려받기</button>' +
         '<button type="button" class="btn" id="p-print">인쇄 · PDF로 저장</button></div>' +
         '<p class="no-print muted small">부서·직위만 이 브라우저에 저장됩니다. 이름 등 개인정보는 넣지 마세요. 비워 두면 ○○○로 인쇄되어 손으로 채울 수 있습니다.</p>';
@@ -697,7 +738,7 @@
       html += '<section class="doc-sec"><h2>1. 법안 개요</h2><table>' +
         "<tr><th>의안번호</th><td>" + esc(b.no) + "</td></tr><tr><th>법안명</th><td>" + esc(b.name) + "</td></tr>" +
         "<tr><th>소관위원회</th><td>" + esc(b.committee) + "</td></tr><tr><th>제안일</th><td>" + esc(b.date) + "</td></tr>" +
-        "<tr><th>분야</th><td>" + esc(fieldName(b.field)) + " (자동 분류, 확신도 " + Math.round(b.conf * 100) + "%)</td></tr>" +
+        "<tr><th>분야</th><td>" + esc(fieldName(b.field)) + " (자동 분류)" + (lowConf(b) ? ' <span class="flag">· 분류 확인 필요</span>' : "") + "</td></tr>" +
         "<tr><th>검토 쟁점</th><td>" + esc(demo.title) + "</td></tr></table></section>";
       html += '<section class="doc-sec"><h2>2. 적용 기준</h2><table>' +
         "<tr><th>법안 원문</th><td>" + esc(demo.source_text) + "</td></tr>" +
@@ -756,7 +797,7 @@
     t(D.region + " 건축물 대상 · 작성일 " + today() + " · 부서 " + blank(prefs.dept) + " · 작성 " + blank(prefs.writer), "small");
     t("1. 법안 개요", "head");
     t("의안번호: " + b.no); t("법안명: " + b.name); t("소관위원회: " + b.committee); t("제안일: " + b.date);
-    t("분야: " + fieldName(b.field) + " (자동 분류, 확신도 " + Math.round(b.conf * 100) + "%)"); t("검토 쟁점: " + demo.title);
+    t("분야: " + fieldText(b)); t("검토 쟁점: " + demo.title);
     t("2. 적용 기준", "head");
     t("법안 원문: " + demo.source_text); t("적용 규칙: " + ruleText(demo.rule).join(" / ")); t("해석 메모: " + demo.rule_note);
     t("3. 판정 결과 (" + D.region + " " + fmt(D.total) + "동)", "head");
@@ -795,7 +836,7 @@
       .sort(function (a, b) { return ((progress[b.no] || {}).t || "") > ((progress[a.no] || {}).t || "") ? 1 : -1; });
     var html = '<h2>진행 현황</h2><p class="lead">법안 검토가 어디까지 됐는지. 기록은 이 브라우저에만 저장되므로, 담당자끼리는 CSV로 주고받습니다.</p>';
     html += '<div class="kpis">' + PG_KEYS.map(function (k) {
-      return kpi(PG[k].mark + " " + PG[k].label, fmt(cnt[k]) + "건", k === "done" ? "결재 대기" : k === "hold" ? "시행령 확정 등을 기다림" :
+      return kpi(PG[k].label, fmt(cnt[k]) + "건", k === "done" ? "결재 대기" : k === "hold" ? "시행령 확정 등을 기다림" :
         k === "doing" ? "담당자가 보고 있음" : "계류 법안 " + fmt(D.bills.length) + "건 중", k === "done" && cnt.done > 0);
     }).join("") + "</div>";
     html += '<div class="toolbar no-print" style="margin-top:16px"><b>검토 기록</b><span class="spacer"></span>' +
@@ -884,10 +925,10 @@
     $view.innerHTML = '<h2>데이터·한계</h2><p class="lead">이 화면의 숫자가 어디서 왔고, 어디까지 믿을 수 있는지</p>' +
       '<div class="table-wrap"><table class="dt"><thead><tr><th>자료</th><th>출처</th><th>범위</th><th>쓰는 곳</th></tr></thead><tbody>' +
       "<tr><td>법안 목록·제안이유</td><td>열린국회정보 Open API</td><td>22대 국회 계류 " + fmt(D.bills.length) + "건 (건축·주거·안전 관련 위원회)</td><td>법안 검토 목록, 분야 분류, 질의 도우미</td></tr>" +
-      "<tr><td>분야 분류</td><td>팀 자체 Keras 신경망</td><td>9개 분야, 법안마다 확신도</td><td>분야 필터 (자동 분류라 틀릴 수 있음)</td></tr>" +
+      "<tr><td>분야 분류</td><td>팀 자체 Keras 신경망</td><td>9개 분야 자동 분류. 확신도 " + CONF_LOW + " 미만은 「분류 확인 필요」 표시</td><td>분야 필터 (자동 분류라 틀릴 수 있음)</td></tr>" +
       "<tr><td>건물 속성</td><td>국토교통부 브이월드 건물통합정보</td><td>" + esc(D.region) + " " + fmt(D.total) + "동 · PNU, 주용도, 연면적, 층수, 사용승인일</td><td>판정, 건물 명부</td></tr>" +
       "<tr><td>적용 기준</td><td>법안 원문에서 사람이 추출 (시범)</td><td>" + Object.keys(D.demos).length + "건</td><td>판정 (나머지는 AI 추출 예정)</td></tr>" +
-      "<tr><td>질의 도우미</td><td>OpenAI (별도 서버 경유)</td><td>공개 법안 자료와 질문만 보냄</td><td>오른쪽 아래 「질의 도우미」</td></tr>" +
+      "<tr><td>질의 도우미</td><td>OpenAI (별도 서버 경유)</td><td>공개 법안 자료와 질문만 보냄. 설정에서 끌 수 있음</td><td>오른쪽 아래 「질의 도우미」</td></tr>" +
       "</tbody></table></div>" +
       "<h3>한계</h3><div class=\"note-box\"><ul style=\"margin:0;padding-left:18px\">" +
       "<li>판정 결과는 추정이며 법률 판단이 아닙니다. 현장 확인 전 자료입니다.</li>" +
@@ -895,16 +936,22 @@
       "<li>주용도 코드와 법안 용어의 대응은 검증 전입니다.</li>" +
       "<li>질의 도우미는 AI 답변입니다. 답 아래 근거 법안을 반드시 확인하세요.</li>" +
       "<li>이 화면은 시연용으로 공개되어 있습니다. 도입 시에는 행정망 내부에서만 씁니다. 건물명·소유자 등 개인정보는 처음부터 수집하지 않습니다.</li>" +
-      "</ul></div>";
+      "</ul></div>" +
+      '<h3 id="intranet">행정망에 들일 때</h3><div class="table-wrap"><table class="dt"><thead><tr><th>항목</th><th>지금</th><th>행정망에서</th></tr></thead><tbody>' +
+      '<tr><td>글꼴</td><td><span class="pg pg-done">완료</span> Pretendard 글꼴 파일을 화면과 함께 둠 (외부 글꼴 서버 안 씀)</td><td>그대로 사용</td></tr>' +
+      "<tr><td>지도</td><td>브이월드 3D 지도 · 키가 없으면 OpenStreetMap 바탕의 가벼운 지도</td><td>행정망용 지도(기관 GIS) 또는 가벼운 지도로 교체 필요</td></tr>" +
+      "<tr><td>질의 도우미</td><td>외부 AI 서버(OpenAI) 경유 · 지금 " + (prefs.ai ? "켜짐" : "꺼짐") + "</td><td>설정에서 끄거나, 기관이 허용한 AI로 교체</td></tr>" +
+      "<tr><td>진행 기록 공유</td><td>이 브라우저에만 저장, 담당자끼리 CSV로 주고받음</td><td>함께 보려면 기관 내부 서버 필요</td></tr>" +
+      "</tbody></table></div>";
   }
 
   // ---------------------------------------------------------------- 공통: 왼쪽 진행 카드 · 상태 바 · 개인정보 안내
   function drawSideProgress() {
     var cnt = { todo: 0, doing: 0, hold: 0, done: 0 };
     D.bills.forEach(function (b) { cnt[pgOf(b.no)]++; });
-    document.getElementById("side-progress").innerHTML = '<div style="margin-bottom:4px"><b>검토 진행</b></div>' +
+    document.getElementById("side-progress").innerHTML = '<div class="hd">검토 진행</div>' +
       PG_KEYS.map(function (k) {
-        return '<div class="row"><span class="pg pg-' + k + '">' + PG[k].mark + " " + PG[k].label + "</span><b>" + fmt(cnt[k]) + "</b></div>";
+        return '<div class="row">' + pgBadge(k) + "<b>" + fmt(cnt[k]) + "</b></div>";
       }).join("");
   }
 
@@ -953,6 +1000,40 @@
     });
   });
 
+  // ---------------------------------------------------------------- 설정: 질의 도우미 켜고 끄기
+  var aiPinged = false;
+  function applyAi() {
+    document.body.classList.toggle("no-ai", !prefs.ai);
+    document.getElementById("pref-ai").checked = !!prefs.ai;
+    var el = document.getElementById("st-ai");
+    if (!prefs.ai) {
+      document.getElementById("ask-panel").classList.add("hidden");
+      document.getElementById("ask-fab").classList.add("hidden");
+      el.innerHTML = '<i class="dot"></i>질의 도우미 꺼짐';
+      aiPinged = false;
+    } else {
+      if (document.getElementById("ask-panel").classList.contains("hidden")) document.getElementById("ask-fab").classList.remove("hidden");
+      if (!aiPinged) { aiPinged = true; el.innerHTML = '<i class="dot"></i>질의 도우미 확인 중'; pingAsk(); }
+    }
+  }
+  var setBtn = document.getElementById("settings-btn"), setMenu = document.getElementById("settings-menu");
+  function setMenuOpen(open) {
+    setMenu.classList.toggle("hidden", !open);
+    setBtn.setAttribute("aria-expanded", String(open));
+  }
+  setBtn.addEventListener("click", function (e) { e.stopPropagation(); setMenuOpen(setMenu.classList.contains("hidden")); });
+  document.addEventListener("click", function (e) { if (!setMenu.contains(e.target) && !setBtn.contains(e.target)) setMenuOpen(false); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !setMenu.classList.contains("hidden")) { setMenuOpen(false); setBtn.focus(); }
+  });
+  document.getElementById("pref-ai").addEventListener("change", function (e) {
+    prefs.ai = e.target.checked;
+    save("prefs", prefs);
+    applyAi();
+    if (location.hash === "#/sources") route();
+  });
+  document.getElementById("role-btn").addEventListener("click", function () { setMenuOpen(false); welcome(); });
+
   // 처음 오면 역할을 고르게 한다 (사각119 첫 진입 화면)
   function welcome() {
     var m = modal('<h3>빼곡 행정 화면</h3><p class="small" style="margin:0">국회 계류 법안이 ' + esc(D.region) +
@@ -980,6 +1061,7 @@
     { sel: "#todo-cards", text: "지금 할 일: 검토 순서를 정해 줍니다. 법 적용 여부를 정하지는 않습니다." },
     { sel: '#nav a[data-route="bills"]', text: "법안 검토 목록에서 678건을 찾고, 여러 건의 진행 상태를 한꺼번에 바꿀 수 있습니다." },
     { sel: '#nav a[data-route="progress"]', text: "진행 현황에서 검토가 어디까지 됐는지 보고, 담당자끼리 CSV로 주고받습니다." },
+    { sel: "#settings-btn", text: "설정에서 질의 도우미를 끄거나 둘러보기를 다시 볼 수 있습니다. 행정망에서는 질의 도우미를 끄세요." },
     { sel: "#ask-fab", text: "질의 도우미에게 법안과 판정 결과를 물어볼 수 있습니다. 답 아래 근거 법안이 함께 나옵니다." },
     { sel: "#privacy-btn", text: "무엇을 저장하고 무엇을 수집하지 않는지는 여기서 확인합니다." },
   ];
@@ -1013,12 +1095,13 @@
     document.getElementById("tour-next").onclick = function () { tourAt++; showTour(); };
     document.getElementById("tour-skip").onclick = endTour;
   }
-  document.getElementById("tour-btn").addEventListener("click", startTour);
+  document.getElementById("tour-btn").addEventListener("click", function () { setMenuOpen(false); startTour(); });
 
   // ---------------------------------------------------------------- 질의 도우미 (AI, 별도 서버)
   var askBill = null;
   var panel = document.getElementById("ask-panel"), log = document.getElementById("ask-log");
   function openAsk(no) {
+    if (!prefs.ai) return;
     askBill = no || null;
     panel.classList.remove("hidden");
     document.getElementById("ask-fab").classList.add("hidden");
@@ -1080,6 +1163,7 @@
   }
   function pingAsk() {
     var el = document.getElementById("st-ai");
+    if (!prefs.ai) return; // 꺼져 있으면 서버에 묻지 않는다
     fetch(ASK_URL).then(function (r) { return r.json(); }).then(function (j) {
       el.innerHTML = '<i class="dot ' + (j.ok ? "ok" : "bad") + '"></i>질의 도우미 ' + (j.ok ? "연결됨" : "키 없음");
     }).catch(function () { el.innerHTML = '<i class="dot bad"></i>질의 도우미 연결 안 됨'; });
@@ -1120,13 +1204,15 @@
     res[1].demos.forEach(function (d) { D.demos[d.bill_no] = d; });
     document.getElementById("st-bills").textContent = fmt(D.bills.length);
     document.getElementById("st-bldg").textContent = fmt(D.total);
+    document.getElementById("hdr-bldg").textContent = fmt(D.total);
     drawSideProgress();
     window.addEventListener("hashchange", route);
+    if (!prefs.role && SHOT) prefs.role = "review"; // 화면 찍기용: 창 없이 기본 역할 (저장 안 함)
     if (!prefs.role) { route(); welcome(); }
     else {
       if (!location.hash || location.hash === "#") location.hash = ROLES[prefs.role].start;
       route();
     }
-    pingAsk();
+    applyAi();
   }).catch(showError);
 })();

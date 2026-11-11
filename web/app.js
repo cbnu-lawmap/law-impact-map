@@ -3,22 +3,24 @@
   "use strict";
 
   // ---------------------------------------------------------------- 색
+  // 노후도: 청록 한 가지 색의 진하기 (오래될수록 진하게). 사용승인일 없음은 회색
   var AGE_BINS = [
-    { label: "~1979년", test: function (y) { return y <= 1979; }, color: "#7f1d1d" },
-    { label: "1980~1989년", test: function (y) { return y >= 1980 && y <= 1989; }, color: "#c2410c" },
-    { label: "1990~1999년", test: function (y) { return y >= 1990 && y <= 1999; }, color: "#f59e0b" },
-    { label: "2000~2009년", test: function (y) { return y >= 2000 && y <= 2009; }, color: "#84cc16" },
-    { label: "2010년~", test: function (y) { return y >= 2010; }, color: "#0e7490" },
+    { label: "~1979년", test: function (y) { return y <= 1979; }, color: "#0b3a42" },
+    { label: "1980~1989년", test: function (y) { return y >= 1980 && y <= 1989; }, color: "#14636d" },
+    { label: "1990~1999년", test: function (y) { return y >= 1990 && y <= 1999; }, color: "#3f8f98" },
+    { label: "2000~2009년", test: function (y) { return y >= 2000 && y <= 2009; }, color: "#88bfc4" },
+    { label: "2010년~", test: function (y) { return y >= 2010; }, color: "#cce5e7" },
   ];
-  var AGE_UNKNOWN = { label: "사용승인일 없음", color: "#cbd5e1" };
-  var STATUS_COLOR = { 대상: "#dc2626", 경계선: "#f59e0b", 비대상: "#d1d5db", 판정불가: "#6366f1" };
+  var AGE_UNKNOWN = { label: "사용승인일 없음", color: "#a3a9b2" };
+  // 판정 4단계. admin.css 의 --s-* 와 같은 값으로 맞춘다
+  var STATUS_COLOR = { 대상: "#c8372d", 경계선: "#e0a020", 비대상: "#d3d8df", 판정불가: "#5a5fc8" };
   var STATUS_DESC = {
     대상: "기준을 모두 충족",
     경계선: "기준에 근소하게 못 미침 (±10%, ±1년)",
     비대상: "기준에 해당하지 않음",
     판정불가: "속성 없음 또는 시행령 위임",
   };
-  var CONF_LOW = 0.5;
+  var CONF_LOW = 0.6;   // 자동 분류 확신도가 이보다 낮으면 "분류 확인 필요"
 
   // ---------------------------------------------------------------- 상태
   var state = {
@@ -167,28 +169,53 @@
     return loadMapLibre().then(createBasicMap).then(function () { addLayers(bnd); });
   }
 
-  // 지도 종류 전환 링크. 브이월드 키가 있을 때만 보인다
+  // 보기 설정: 지도 종류 세 가지를 작은 창에서 고른다 (주소: 없음 / ?map=real / ?map=basic)
+  // 브이월드 키가 없는 배포에서는 가벼운 지도만 고를 수 있다고 알려 준다
+  var VIEW_OPTS = [
+    { k: "box", q: "", name: "항공사진 + 상자 건물", desc: "브이월드 항공사진 위에 층수만큼 세운 건물 (기본)" },
+    { k: "real", q: "?map=real", name: "실제 건물 모델", desc: "브이월드 실제 3D 건물 모델에 색을 입힘. 무겁고 사양이 필요" },
+    { k: "basic", q: "?map=basic", name: "가벼운 지도", desc: "흑백 지도 위 층수 높이 건물. 느리거나 행정망일 때" },
+  ];
   function renderEngineToggle() {
-    if (!window.VWORLD_ON) return;
-    var old = document.querySelector(".engine-toggle");
+    var old = document.querySelector(".view-set");
     if (old) old.remove();
     var here = engine !== "vworld" ? "basic" : wantReal ? "real" : "box";
-    var links = {
-      box: ["", "항공사진 지도로 보기", "브이월드 항공사진 위에 층수 높이로 세운 건물 (기본)"],
-      real: ["?map=real", "실제 건물 모델 보기", "브이월드 실제 3D 건물 모델 (무거움, 컴퓨터 사양이 필요)"],
-      basic: ["?map=basic", "가벼운 지도로 보기", "느릴 때: 흑백 지도 위 층수 높이 건물"],
+    // 고른 법안(?bill=)은 지도 종류를 바꿔도 이어지게, 창을 열 때 주소를 만든다
+    var href = function (q) {
+      var bill = state.selected ? "bill=" + state.selected : "";
+      return location.pathname + (q ? q + (bill ? "&" + bill : "") : bill ? "?" + bill : "");
     };
-    var div = document.createElement("div");
-    div.className = "engine-toggle";
-    ["box", "real", "basic"].forEach(function (k) {
-      if (k === here) return;
-      var a = document.createElement("a");
-      a.href = location.pathname + links[k][0];
-      a.textContent = links[k][1];
-      a.title = links[k][2];
-      div.appendChild(a);
+    var cur = VIEW_OPTS.filter(function (o) { return o.k === here; })[0];
+    var wrap = document.createElement("div");
+    wrap.className = "view-set";
+    wrap.innerHTML = '<button type="button" class="view-set-btn" aria-haspopup="true" aria-expanded="false" aria-controls="view-pop">' +
+      '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 1.8 14.2 5 8 8.2 1.8 5Z"/><path d="m1.8 8 6.2 3.2L14.2 8"/><path d="m1.8 11 6.2 3.2 6.2-3.2"/></svg>' +
+      '보기 설정 <span class="cur">' + esc(cur.name) + "</span></button>" +
+      '<div class="view-pop hidden" id="view-pop" role="menu"><div class="hd">지도 종류</div>' +
+      VIEW_OPTS.map(function (o) {
+        var on = o.k === here;
+        var can = window.VWORLD_ON || o.k === "basic";
+        var inner = '<span class="chk" aria-hidden="true"></span><b>' + esc(o.name) + "</b><small>" + esc(o.desc) + "</small>";
+        return can
+          ? '<a role="menuitemradio" aria-checked="' + on + '" aria-current="' + on + '" data-q="' + o.q + '" href="' + esc(href(o.q)) + '">' + inner + "</a>"
+          : '<div class="off" role="menuitemradio" aria-checked="false" aria-disabled="true">' + inner + "</div>";
+      }).join("") +
+      (window.VWORLD_ON ? "" : '<div class="foot">이 배포에는 브이월드 키가 없어 가벼운 지도만 쓸 수 있습니다.</div>') + "</div>";
+    $("map").parentNode.appendChild(wrap);
+    var btn = wrap.querySelector(".view-set-btn"), pop = wrap.querySelector(".view-pop");
+    var setOpen = function (open) {
+      pop.classList.toggle("hidden", !open);
+      btn.setAttribute("aria-expanded", String(open));
+    };
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      pop.querySelectorAll("a[data-q]").forEach(function (a) { a.href = href(a.getAttribute("data-q")); });
+      setOpen(pop.classList.contains("hidden"));
     });
-    $("map").parentNode.appendChild(div);
+    document.addEventListener("click", function (e) { if (!wrap.contains(e.target)) setOpen(false); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && !pop.classList.contains("hidden")) { setOpen(false); btn.focus(); }
+    });
   }
 
   // 브이월드 지도의 건물 속성 카드
@@ -347,7 +374,7 @@
     $("bill-list").innerHTML = list.map(function (b) {
       var badges = "";
       if (state.demos[b.no]) badges += '<span class="badge demo">판정 시범</span>';
-      if (b.conf !== null && b.conf < CONF_LOW) badges += '<span class="badge uncertain" title="분류 확신도 ' + b.conf + '">분야 불확실</span>';
+      if (b.conf != null && b.conf < CONF_LOW) badges += '<span class="badge uncertain" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>';
       return '<li tabindex="0" data-no="' + b.no + '"' + (state.selected === b.no ? ' class="active"' : "") + ">" +
         '<div class="b-name">' + esc(b.name) + "</div>" +
         '<div class="b-meta"><span>' + esc(b.date) + "</span><span>" + esc(b.committee) + "</span>" +
@@ -367,9 +394,9 @@
     var html = '<button class="close" type="button" aria-label="닫기">×</button>' +
       "<h3>" + esc(b.name) + "</h3>" +
       '<div class="b-meta"><span>의안번호 ' + esc(b.no) + "</span><span>" + esc(b.date) + "</span><span>" +
-      esc(b.committee) + '</span><span class="badge">' + esc(state.fields[b.field] || "미분류") +
-      (b.conf !== null ? " · 확신도 " + b.conf.toFixed(2) : "") + "</span>" +
-      (b.conf !== null && b.conf < CONF_LOW ? '<span class="badge uncertain">분야 불확실</span>' : "") + "</div>";
+      esc(b.committee) + '</span><span class="badge" title="법안 내용으로 자동 분류한 분야입니다">' + esc(state.fields[b.field] || "미분류") +
+      ' <span class="sub">자동 분류</span></span>' +
+      (b.conf != null && b.conf < CONF_LOW ? '<span class="badge uncertain">분류 확인 필요</span>' : "") + "</div>";
 
     if (demo) {
       var res = Judge.countAll(state.props, demo.rule);
@@ -458,7 +485,7 @@
     state.checked.add(null); // 분야 예측이 없는 법안
     demo.demos.forEach(function (d) { state.demos[d.bill_no] = d; });
     state.props = bldg.features.map(function (f) { return f.properties; });
-    $("bldg-total").textContent = "· 건물 " + fmt(state.props.length) + "동";
+    $("bldg-total").textContent = fmt(state.props.length);
 
     // 지도용 사본: 원래 속성은 state.props 에 두고, 지도에는 번호·높이·색만 싣는다
     state.buildings = {
@@ -500,7 +527,7 @@
     });
     map.addLayer({
       id: "boundary", type: "line", source: "boundary",
-      paint: { "line-color": "#1f4fa3", "line-width": 2.5, "line-dasharray": [3, 2] },
+      paint: { "line-color": "#102038", "line-width": 2, "line-dasharray": [3, 2] },
     });
 
     // 경계에 맞춰 보기
