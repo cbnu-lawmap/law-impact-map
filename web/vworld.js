@@ -11,6 +11,9 @@
   var READY_TIMEOUT_MS = 20000;
   var FILL_ALPHA = 0.7;   // 실제 건물 모델 위 덧칠
   var BOX_ALPHA = 0.8;    // 상자 건물
+  // 상자 건물 모드의 항공사진 톤 (채도를 낮춰 색칠한 건물이 먼저 보이게).
+  // create() 안에서 지도가 이미 준비돼 있으면 곧바로 쓰이므로 반드시 파일 맨 위에 둔다.
+  var IMAGERY_TONE = { saturation: 0.4, brightness: 0.95, contrast: 1.0 };
 
   function toColor(c, a) {
     var r, g, b;
@@ -195,7 +198,6 @@
       return changed;
     }
 
-    var IMAGERY_TONE = { saturation: 0.4, brightness: 0.95, contrast: 1.0 };
     function softenLayer(l) {
       if (!l) return;
       l.saturation = IMAGERY_TONE.saturation;
