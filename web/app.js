@@ -187,7 +187,7 @@
     };
     var cur = VIEW_OPTS.filter(function (o) { return o.k === here; })[0];
     var wrap = document.createElement("div");
-    wrap.className = "view-set";
+    wrap.className = "view-set" + (engine === "vworld" ? " on-vworld" : "");
     wrap.innerHTML = '<button type="button" class="view-set-btn" aria-haspopup="true" aria-expanded="false" aria-controls="view-pop">' +
       '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M8 1.8 14.2 5 8 8.2 1.8 5Z"/><path d="m1.8 8 6.2 3.2L14.2 8"/><path d="m1.8 11 6.2 3.2 6.2-3.2"/></svg>' +
       '보기 설정 <span class="cur">' + esc(cur.name) + "</span></button>" +

@@ -243,6 +243,8 @@ h2 { margin: 0; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); 
 
 /* 보기 설정 (지도 종류 고르기) */
 .view-set { position: absolute; z-index: 2200; right: 12px; top: 12px; }
+/* 브이월드 지도는 오른쪽 위에 자체 조작 단추(나침반·확대 등)가 있어 그 왼쪽에 둔다 */
+.view-set.on-vworld { right: 72px; }
 .view-set-btn {
   display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
   background: rgba(255, 255, 255, 0.97); border: 1px solid var(--line); border-radius: var(--r-pill);
