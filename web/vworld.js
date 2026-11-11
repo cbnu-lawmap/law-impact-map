@@ -11,6 +11,9 @@
   var READY_TIMEOUT_MS = 20000;
   var FILL_ALPHA = 0.7;   // 실제 건물 모델 위 덧칠
   var BOX_ALPHA = 0.8;    // 상자 건물
+  // 상자 건물 모드의 항공사진 톤 (채도를 낮춰 색칠한 건물이 먼저 보이게).
+  // create() 안에서 지도가 이미 준비돼 있으면 곧바로 쓰이므로 반드시 파일 맨 위에 둔다.
+  var IMAGERY_TONE = { saturation: 0.4, brightness: 0.95, contrast: 1.0 };
 
   function toColor(c, a) {
     var r, g, b;
@@ -173,6 +176,10 @@
               lightMode();
             }, 500);
             viewer.camera.moveEnd.addEventListener(lightMode);
+            // 항공사진 색을 눌러(채도 낮춤) 색칠한 건물이 먼저 눈에 들어오게 한다.
+            // 브이월드가 나중에 영상 레이어를 더 넣을 수 있어, 레이어가 들어올 때마다 다시 맞춘다.
+            softenImagery();
+            viewer.imageryLayers.layerAdded.addEventListener(function (l) { softenLayer(l); viewer.scene.requestRender(); });
           }
           resolve();
         } else if (Date.now() - t0 > READY_TIMEOUT_MS) {
@@ -191,8 +198,25 @@
       return changed;
     }
 
+    function softenLayer(l) {
+      if (!l) return;
+      l.saturation = IMAGERY_TONE.saturation;
+      l.brightness = IMAGERY_TONE.brightness;
+      l.contrast = IMAGERY_TONE.contrast;
+    }
+    function softenImagery() {
+      var L = viewer.imageryLayers;
+      for (var i = 0; i < L.length; i++) softenLayer(L.get(i));
+      viewer.scene.requestRender();
+    }
+
     function lightMode() {
       var changed = hideModels(viewer.scene.primitives);
+      // 브이월드가 영상 레이어를 늦게 넣어 layerAdded 를 놓칠 수 있으므로 여기서도 톤을 맞춘다
+      var L = viewer.imageryLayers;
+      for (var i = 0; i < L.length; i++) {
+        if (L.get(i).saturation !== IMAGERY_TONE.saturation) { softenLayer(L.get(i)); changed = true; }
+      }
       if (!(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)) {
         viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
         changed = true;
