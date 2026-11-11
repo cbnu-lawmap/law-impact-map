@@ -369,11 +369,15 @@
   function renderBills() {
     var list = filteredBills();
     $("bill-count").textContent = "법안 " + fmt(list.length) + "건 / 전체 " + fmt(state.bills.length) + "건";
-    // 판정 시범 법안을 맨 위로
-    list.sort(function (a, b) { return (state.demos[b.no] ? 1 : 0) - (state.demos[a.no] ? 1 : 0); });
+    // 판정한 법안을 맨 위로, 그중 사창동 영향(대상+경계선)이 큰 순
+    var weight = function (b) { var d = state.demos[b.no]; return d ? 1 + d.counts.대상 + d.counts.경계선 : 0; };
+    list.sort(function (a, b) { return weight(b) - weight(a); });
     $("bill-list").innerHTML = list.map(function (b) {
       var badges = "";
-      if (state.demos[b.no]) badges += '<span class="badge demo">판정 시범</span>';
+      if (state.demos[b.no]) {
+        var dd = state.demos[b.no], hit = dd.counts.대상 + dd.counts.경계선;
+        badges += '<span class="badge demo">판정' + (hit ? " · " + fmt(hit) + "동" : "") + "</span>";
+      }
       if (b.conf != null && b.conf < CONF_LOW) badges += '<span class="badge uncertain" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>';
       return '<li tabindex="0" data-no="' + b.no + '"' + (state.selected === b.no ? ' class="active"' : "") + ">" +
         '<div class="b-name">' + esc(b.name) + "</div>" +
@@ -403,7 +407,8 @@
       var c = res.counts;
       var reasonLines = Object.keys(res.reasons).filter(function (k) { return k.indexOf("판정불가|") === 0; })
         .map(function (k) { return k.split("|")[1] + " " + fmt(res.reasons[k]) + "동"; }).join(" · ");
-      html += '<div class="judge-box"><h4>판정 시범 (사창동 ' + fmt(state.props.length) + "동)</h4>" +
+      html += '<div class="judge-box"><h4>판정 (사창동 ' + fmt(state.props.length) + "동)</h4>" +
+        '<p class="method">기준 추출: ' + esc(demo.method || "사람 추출") + "</p>" +
         '<div class="quote">' + esc(demo.source_text) + "</div>" +
         '<div class="rule">' + esc(ruleText(demo.rule)) + "</div>" +
         '<div class="counts">' + Judge.STATUSES.map(function (s) {
@@ -546,7 +551,7 @@
 
   // 판정 시범 2건의 동수가 중간보고 숫자(build_web_data.py 결과)와 같은지 콘솔에서 확인
   function selfCheck() {
-    console.group("[빼곡] 판정 시범 동수 확인");
+    console.group("[빼곡] 판정 동수 확인");
     Object.keys(state.demos).forEach(function (no) {
       var d = state.demos[no];
       var got = Judge.countAll(state.props, d.rule).counts;

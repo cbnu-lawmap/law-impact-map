@@ -266,10 +266,12 @@
     var judgedNos = Object.keys(D.demos);
     var cnt = { todo: 0, doing: 0, hold: 0, done: 0 };
     D.bills.forEach(function (b) { cnt[pgOf(b.no)]++; });
-    var hitTotal = 0, unknownTotal = 0;
+    // 법안마다 대상·경계선 동수를 따로 본다 (법안끼리 더하면 같은 건물이 여러 번 세어짐)
+    var hitBills = 0, hitMax = 0;
     judgedNos.forEach(function (no) {
-      hitTotal += D.demos[no].counts.대상 + D.demos[no].counts.경계선;
-      unknownTotal += D.demos[no].counts.판정불가;
+      var h = D.demos[no].counts.대상 + D.demos[no].counts.경계선;
+      if (h) hitBills++;
+      if (h > hitMax) hitMax = h;
     });
     var judgedDone = judgedNos.filter(function (no) { return pgOf(no) === "done"; }).length;
     var role = prefs.role || "review";
@@ -277,7 +279,7 @@
       review: [
         kpi("지금 검토할 법안", fmt(judgedNos.length - judgedDone) + "건", "판정했고 아직 검토 완료 전"),
         kpi("검토 중", fmt(cnt.doing) + "건", "보류 " + fmt(cnt.hold) + "건"),
-        kpi("영향 건물 (대상·경계선)", fmt(hitTotal) + "동", "판정불가 후보 " + fmt(unknownTotal) + "동"),
+        kpi("사창동에 영향 있는 법안", fmt(hitBills) + "건", "대상·경계선 1동 이상 · 최대 " + fmt(hitMax) + "동"),
         kpi("기준 추출 대기", fmt(D.bills.length - judgedNos.length) + "건", "AI 기준 추출 단계에서 판정 예정", true),
       ],
       approve: [
@@ -288,8 +290,8 @@
       ],
       chief: [
         kpi("계류 법안", fmt(D.bills.length) + "건", "22대 국회 · 건축·주거·안전 분야"),
-        kpi("판정한 법안", fmt(judgedNos.length) + "건", "적용 기준을 사람이 추출한 시범"),
-        kpi("영향 건물 (대상·경계선)", fmt(hitTotal) + "동", D.region + " " + fmt(D.total) + "동 중"),
+        kpi("판정한 법안", fmt(judgedNos.length) + "건", methodSummary()),
+        kpi("사창동에 영향 있는 법안", fmt(hitBills) + "건", "판정한 " + fmt(judgedNos.length) + "건 중 · 최대 " + fmt(hitMax) + "동"),
         kpi("검토 진척률", judgedNos.length ? Math.round(judgedDone / judgedNos.length * 100) + "%" : "-", "판정한 법안 중 검토 완료", true),
       ],
     }[role];
@@ -539,7 +541,14 @@
   function billHead(b) {
     return '<div class="crumb no-print"><a href="#/bills">← 법안 검토 목록</a></div>' +
       "<h2>" + esc(b.name) + '</h2><p class="lead">의안번호 ' + esc(b.no) + " · " + esc(b.committee) + " · 제안 " + esc(b.date) +
-      " · " + fieldTag(b) + " · " + pgMark(b.no) + "</p>";
+      " · " + fieldTag(b) + " · " + pgMark(b.no) +
+      (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>";
+  }
+  function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }
+  // 판정한 법안의 기준 추출 방법 요약 (예: "사람 추출 2건 · AI 추출 24건(검토 전)")
+  function methodSummary() {
+    var ai = Object.keys(D.demos).filter(isAI).length, human = Object.keys(D.demos).length - ai;
+    return "사람 추출 " + human + "건" + (ai ? " · AI 추출 " + ai + "건(검토 전)" : "");
   }
 
   // 진행 상태 · 메모 · 처리 이력 (필지 블랙박스 사건 이력, 사각119 인계 메모)
@@ -743,7 +752,8 @@
       html += '<section class="doc-sec"><h2>2. 적용 기준</h2><table>' +
         "<tr><th>법안 원문</th><td>" + esc(demo.source_text) + "</td></tr>" +
         "<tr><th>적용 규칙</th><td>" + ruleText(demo.rule).map(esc).join("<br>") + "</td></tr>" +
-        "<tr><th>해석 메모</th><td>" + esc(demo.rule_note) + "</td></tr></table></section>";
+        "<tr><th>해석 메모</th><td>" + esc(demo.rule_note) + "</td></tr>" +
+        "<tr><th>기준 추출</th><td>" + esc(demo.method || "사람 추출") + "</td></tr></table></section>";
       html += '<section class="doc-sec"><h2>3. 판정 결과 (' + esc(D.region) + " " + fmt(D.total) + "동)</h2><table>" +
         "<tr><th>구분</th><td><b>동수</b></td><td><b>비율</b></td><td><b>뜻</b></td></tr>" +
         STATUSES.map(function (s) {
@@ -799,7 +809,7 @@
     t("의안번호: " + b.no); t("법안명: " + b.name); t("소관위원회: " + b.committee); t("제안일: " + b.date);
     t("분야: " + fieldText(b)); t("검토 쟁점: " + demo.title);
     t("2. 적용 기준", "head");
-    t("법안 원문: " + demo.source_text); t("적용 규칙: " + ruleText(demo.rule).join(" / ")); t("해석 메모: " + demo.rule_note);
+    t("법안 원문: " + demo.source_text); t("적용 규칙: " + ruleText(demo.rule).join(" / ")); t("해석 메모: " + demo.rule_note); t("기준 추출: " + (demo.method || "사람 추출"));
     t("3. 판정 결과 (" + D.region + " " + fmt(D.total) + "동)", "head");
     STATUSES.forEach(function (s) { t("· " + s + ": " + fmt(J.counts[s]) + "동 (" + pct(J.counts[s], D.total) + ") — " + R.means[s]); });
     t("결론: " + demo.conclusion);
@@ -915,7 +925,7 @@
     html += card("V-01", "판정 재현", "채택", "Python(collect/build_web_data.py)과 화면(judge.js)이 같은 규칙. 지도 화면도 열 때마다 콘솔에서 대조.<br>" + checksHtml) +
       card("V-02", "판정불가 비율", "참고", "사창동 2,448동 중 건축물대장 미연계 약 13.4%(328동). 판정한 법안마다 판정불가가 커지는 원인") +
       card("V-03", "분야 자동 분류 확신도", "참고", "확신도 0.9 이상 " + fmt(hi) + "건 · 0.6 미만 " + fmt(lo) + "건 (전체 " + fmt(D.bills.length) + "건). 낮은 법안은 분야 필터에서 빠지거나 잘못 들어갈 수 있음") +
-      card("V-04", "기준 추출", "보류", "판정한 법안 " + judgedNos.length + "건은 사람이 추출. 나머지 " + fmt(D.bills.length - judgedNos.length) + "건은 AI 추출(원문 수치 자동 대조) 단계에서 판정 예정") +
+      card("V-04", "기준 추출", "보류", "판정한 법안 " + judgedNos.length + "건 — " + methodSummary() + ". AI 추출 건은 원문 문구·수치를 자동 대조했지만 담당자 검토 전. 나머지 " + fmt(D.bills.length - judgedNos.length) + "건은 AI 추출(원문 수치 자동 대조) 단계에서 판정 예정") +
       card("V-05", "질의 도우미 답의 숫자", "채택", "서버가 답에 나온 숫자를 근거 자료와 대조해, 근거에 없는 숫자는 경고로 표시");
     $view.innerHTML = html;
   }
@@ -927,7 +937,7 @@
       "<tr><td>법안 목록·제안이유</td><td>열린국회정보 Open API</td><td>22대 국회 계류 " + fmt(D.bills.length) + "건 (건축·주거·안전 관련 위원회)</td><td>법안 검토 목록, 분야 분류, 질의 도우미</td></tr>" +
       "<tr><td>분야 분류</td><td>팀 자체 Keras 신경망</td><td>9개 분야 자동 분류. 확신도 " + CONF_LOW + " 미만은 「분류 확인 필요」 표시</td><td>분야 필터 (자동 분류라 틀릴 수 있음)</td></tr>" +
       "<tr><td>건물 속성</td><td>국토교통부 브이월드 건물통합정보</td><td>" + esc(D.region) + " " + fmt(D.total) + "동 · PNU, 주용도, 연면적, 층수, 사용승인일</td><td>판정, 건물 명부</td></tr>" +
-      "<tr><td>적용 기준</td><td>법안 원문에서 사람이 추출 (시범)</td><td>" + Object.keys(D.demos).length + "건</td><td>판정 (나머지는 AI 추출 예정)</td></tr>" +
+      "<tr><td>적용 기준</td><td>법안 원문에서 추출 (" + methodSummary() + ", 원문 대조)</td><td>" + Object.keys(D.demos).length + "건</td><td>판정 (나머지는 추출 예정)</td></tr>" +
       "<tr><td>질의 도우미</td><td>OpenAI (별도 서버 경유)</td><td>공개 법안 자료와 질문만 보냄. 설정에서 끌 수 있음</td><td>오른쪽 아래 「질의 도우미」</td></tr>" +
       "</tbody></table></div>" +
       "<h3>한계</h3><div class=\"note-box\"><ul style=\"margin:0;padding-left:18px\">" +

@@ -31,3 +31,6 @@ Thumbs.db
 
 # Vercel 연결 정보
 .vercel/
+
+# Claude Code 작업 폴더
+.claude/worktrees/

@@ -184,6 +184,7 @@ h2 { margin: 0; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); 
 .detail a { color: var(--accent); font-size: var(--fs-sm); font-weight: 600; }
 .judge-box { margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--r-md); background: #fff; }
 .judge-box h4 { margin: 0 0 var(--sp-2); font-size: var(--fs-sm); }
+.judge-box .method { margin: -4px 0 var(--sp-2); font-size: var(--fs-xs); color: var(--muted); }
 .judge-box .rule { font-family: ui-monospace, Consolas, monospace; font-size: var(--fs-xs); background: var(--bg); padding: 6px 8px; border-radius: var(--r-sm); word-break: break-all; color: var(--ink-2); }
 .judge-box .quote { font-size: var(--fs-sm); color: var(--ink-2); border-left: 3px solid var(--line-2); padding-left: 10px; margin: 6px 0 8px; }
 .counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin: var(--sp-3) 0 var(--sp-2); }
