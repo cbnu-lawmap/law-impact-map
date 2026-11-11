@@ -1,4 +1,4 @@
-# 법안 영향 지도 (law-impact-map)
+# 빼곡 (law-impact-map)
 
 <div align="center">
 

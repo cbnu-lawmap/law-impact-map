@@ -1,4 +1,4 @@
-/* 법안 영향 지도 — 화면 로직 (브이월드 3D 지도, 실패 시 MapLibre GL JS 3D, 빌드 도구 없음) */
+/* 빼곡 — 화면 로직 (브이월드 3D 지도, 실패 시 MapLibre GL JS 3D, 빌드 도구 없음) */
 (function () {
   "use strict";
 
@@ -513,7 +513,7 @@
 
   // 판정 시범 2건의 동수가 중간보고 숫자(build_web_data.py 결과)와 같은지 콘솔에서 확인
   function selfCheck() {
-    console.group("[법안 영향 지도] 판정 시범 동수 확인");
+    console.group("[빼곡] 판정 시범 동수 확인");
     Object.keys(state.demos).forEach(function (no) {
       var d = state.demos[no];
       var got = Judge.countAll(state.props, d.rule).counts;
