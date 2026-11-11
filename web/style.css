@@ -45,6 +45,12 @@ button, input { font: inherit; color: inherit; }
   background: var(--bg); border: 1px solid var(--line); border-radius: 999px;
   padding: 4px 12px; white-space: nowrap;
 }
+.top-right { display: flex; align-items: center; gap: 8px; }
+.admin-link {
+  font-size: 13px; font-weight: 600; color: #fff; background: var(--accent); text-decoration: none;
+  border-radius: 999px; padding: 5px 14px; white-space: nowrap;
+}
+.admin-link:hover { filter: brightness(1.08); }
 .region .dot { width: 7px; height: 7px; border-radius: 50%; background: #16a34a; }
 
 /* 본문 2단 */
