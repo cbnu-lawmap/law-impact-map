@@ -14,8 +14,17 @@
   <header class="bar no-print">
     <a class="brand" href="#/">빼곡 <span>행정 화면</span></a>
     <div class="bar-right">
-      <span class="chip">청주시 서원구 사창동 · 건물 <b id="bldg-total">2,448</b>동</span>
-      <a class="btn ghost" href="index.html">지도로 돌아가기</a>
+      <select id="role" class="ctl" title="역할은 첫 화면과 상황판 카드 순서만 바꿉니다 (권한 차이 없음)" aria-label="역할">
+        <option value="review">법안 검토 담당</option>
+        <option value="approve">결재·관리</option>
+        <option value="chief">관내 총괄</option>
+      </select>
+      <div class="seg" id="mode" role="group" aria-label="화면 모드">
+        <button type="button" data-mode="work" title="평이한 용어로 할 일 중심">실무</button>
+        <button type="button" data-mode="audit" title="판정 규칙·검증·원본 규칙을 함께 표시">심사·검증</button>
+      </div>
+      <button type="button" class="btn ghost" id="tour-btn">둘러보기</button>
+      <a class="btn ghost" href="index.html">지도</a>
     </div>
   </header>
 
@@ -23,14 +32,38 @@
     <nav class="side no-print" id="nav">
       <a href="#/" data-route="home"><b>상황판</b><small>지금 무엇을 봐야 하나</small></a>
       <a href="#/bills" data-route="bills"><b>법안 검토 목록</b><small>어느 법안이 우리 동네에 큰가</small></a>
-      <a href="#/sources" data-route="sources"><b>데이터·한계</b><small>믿을 만한가</small></a>
-      <p class="side-note">판정 결과는 건축물 데이터 기반 추정이며 법률 판단이 아닙니다.
-        소유자 등 개인정보를 수집하지 않습니다.</p>
+      <a href="#/progress" data-route="progress"><b>진행 현황</b><small>어디까지 검토했나</small></a>
+      <a href="#/rules" data-route="rules" class="audit-only"><b>판정 규칙·검증</b><small>판정을 믿을 수 있나</small></a>
+      <a href="#/sources" data-route="sources"><b>데이터·한계</b><small>어디서 온 숫자인가</small></a>
+      <div class="side-card" id="side-progress"></div>
     </nav>
     <main id="view" class="view" aria-live="polite"><p class="muted">불러오는 중…</p></main>
   </div>
 
+  <footer class="status no-print" id="status">
+    <span>판정 규칙 v1 (judge.js)</span>
+    <span>법안 <b id="st-bills">-</b>건 · 건물 <b id="st-bldg">-</b>동</span>
+    <span>진행 기록: 이 브라우저에만 저장</span>
+    <button type="button" class="linkish" id="privacy-btn">개인정보 처리 안내</button>
+    <span class="spacer"></span>
+    <span id="st-ai"><i class="dot"></i>질의 도우미 확인 중</span>
+  </footer>
+
+  <button type="button" class="ask-fab no-print" id="ask-fab">질의 도우미</button>
+  <section class="ask-panel no-print hidden" id="ask-panel" aria-label="질의 도우미">
+    <header><b>질의 도우미</b><span class="tag">AI · 공개 법안 자료만 근거</span><button type="button" class="x" id="ask-close" aria-label="닫기">×</button></header>
+    <div class="ask-log" id="ask-log">
+      <p class="muted small">계류 법안과 사창동 판정 결과를 물어보세요. 개별 집·건물이 대상인지는 답하지 않습니다. 개인정보는 넣지 마세요.</p>
+      <div class="ask-ex" id="ask-ex"></div>
+    </div>
+    <form id="ask-form"><input id="ask-q" maxlength="300" placeholder="예: 소방 분야 최근 법안은?" autocomplete="off" /><button type="submit" class="btn">묻기</button></form>
+  </section>
+
+  <div class="modal hidden" id="modal" role="dialog" aria-modal="true"><div class="modal-box" id="modal-box"></div></div>
+  <div class="tour hidden" id="tour"><div class="tour-hole" id="tour-hole"></div><div class="tour-pop" id="tour-pop"></div></div>
+
   <script src="judge.js"></script>
+  <script src="hwpx.js"></script>
   <script src="admin.js"></script>
 </body>
 </html>
