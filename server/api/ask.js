@@ -61,6 +61,9 @@ function limited(ip) {
 const PII = /(01[016789][-\s]?\d{3,4}[-\s]?\d{4})|(\d{6}[-\s]?[1-4]\d{6})|([\w.+-]+@[\w-]+\.[\w.]+)/;
 const PERSONAL_JUDGE = /(우리\s*집|내\s*집|제\s*집|내\s*건물|제\s*건물|우리\s*건물|저희\s*(집|건물)).*(대상|해당|적용|걸리)/;
 
+// 어느 법안에나 나오는 말이라 검색에서 뺀다
+const STOP = new Set(["판정", "판정한", "결과", "요약", "요약해", "알려", "알려줘", "설명", "정리", "사창동", "영향", "건물", "어떤", "무엇", "뭐야", "있어", "해줘", "줘"]);
+
 // 질문과 관련 있는 법안 고르기 (점수 = 제목 일치 3점 + 요약 일치 1점)
 function retrieve(D, q, billNo) {
   const picked = [];
@@ -69,7 +72,7 @@ function retrieve(D, q, billNo) {
   (q.match(/\d{7}/g) || []).forEach((no) => add(D.bills.find((b) => b.no === no)));
   const words = (q.match(/[가-힣A-Za-z0-9]{2,}/g) || [])
     .map((w) => w.replace(/(은|는|이|가|을|를|의|에|에서|으로|로|과|와|도|만|이야|인가|일까|있어|있나|있는|관련|법안|법률|개정안)$/, ""))
-    .filter((w) => w.length >= 2);
+    .filter((w) => w.length >= 2 && !STOP.has(w));
   if (words.length) {
     const scored = D.bills.map((b) => {
       let s = 0;
@@ -95,6 +98,11 @@ function context(D, bills) {
   D.bills.forEach((b) => { fieldCnt[b.field] = (fieldCnt[b.field] || 0) + 1; });
   const lines = [];
   lines.push(`[전체] 계류 법안 ${D.bills.length}건, 시범 지역 ${D.region} 건물 ${D.total}동, 적용 기준을 추출해 판정한 법안 ${Object.keys(D.demos).length}건`);
+  // 판정한 법안(시범)은 질문과 상관없이 맨 앞에 요약해 둔다. 빠지면 "판정한 법안이 없다"고 잘못 답함
+  lines.push("[판정한 법안 " + Object.keys(D.demos).length + "건] " + Object.keys(D.demos).map((no) => {
+    const d = D.demos[no], b = D.bills.find((x) => x.no === no);
+    return `${no} ${b ? b.name : ""}(${d.title}): 대상 ${d.counts["대상"]}동, 경계선 ${d.counts["경계선"]}동, 비대상 ${d.counts["비대상"]}동, 판정불가 ${d.counts["판정불가"]}동 — ${d.conclusion}`;
+  }).join(" / "));
   lines.push("[분야별 법안 수] " + Object.keys(fieldCnt).map((k) => `${D.fields[k] || "미분류"} ${fieldCnt[k]}건`).join(", "));
   bills.forEach((b) => {
     const d = D.demos[b.no];
@@ -181,7 +189,8 @@ module.exports = async function handler(req, res) {
     if (!r.ok) throw new Error((j.error && j.error.message) || "OpenAI 오류 " + r.status);
     const answer = String(j.choices[0].message.content || "").trim();
     // 근거 표시는 답에 실제로 인용한 법안만 (없으면 질문의 기준 법안)
-    let cited = picked.filter((b) => answer.includes(b.no));
+    const pool = picked.concat(Object.keys(D.demos).map((no) => D.bills.find((b) => b.no === no)).filter((b) => b && !picked.includes(b)));
+    let cited = pool.filter((b) => answer.includes(b.no));
     if (!cited.length && billNo) cited = picked.filter((b) => b.no === billNo);
     res.status(200).json({
       answer,
