@@ -210,6 +210,11 @@
 
     function lightMode() {
       var changed = hideModels(viewer.scene.primitives);
+      // 브이월드가 영상 레이어를 늦게 넣어 layerAdded 를 놓칠 수 있으므로 여기서도 톤을 맞춘다
+      var L = viewer.imageryLayers;
+      for (var i = 0; i < L.length; i++) {
+        if (L.get(i).saturation !== IMAGERY_TONE.saturation) { softenLayer(L.get(i)); changed = true; }
+      }
       if (!(viewer.terrainProvider instanceof Cesium.EllipsoidTerrainProvider)) {
         viewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
         changed = true;
