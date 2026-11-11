@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" role="img" aria-label="빼곡">
+  <!-- 빼곡: 칸이 오른쪽 아래로 갈수록 빽빽하게 차오르는 4×4 격자 (한 가지 색, 진하기만 다름) -->
+  <g fill="#0d6670">
+    <rect x="0.6" y="0.6" width="4.8" height="4.8" rx="1.1" opacity=".22"/>
+    <rect x="6.6" y="0.6" width="4.8" height="4.8" rx="1.1" opacity=".22"/>
+    <rect x="12.6" y="0.6" width="4.8" height="4.8" rx="1.1" opacity=".5"/>
+    <rect x="18.6" y="0.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="0.6" y="6.6" width="4.8" height="4.8" rx="1.1" opacity=".22"/>
+    <rect x="6.6" y="6.6" width="4.8" height="4.8" rx="1.1" opacity=".5"/>
+    <rect x="12.6" y="6.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="18.6" y="6.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="0.6" y="12.6" width="4.8" height="4.8" rx="1.1" opacity=".5"/>
+    <rect x="6.6" y="12.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="12.6" y="12.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="18.6" y="12.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="0.6" y="18.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="6.6" y="18.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="12.6" y="18.6" width="4.8" height="4.8" rx="1.1"/>
+    <rect x="18.6" y="18.6" width="4.8" height="4.8" rx="1.1"/>
+  </g>
+</svg>

@@ -5,15 +5,23 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="robots" content="noindex" />
   <title>빼곡 · 행정 화면</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
+  <link rel="preload" href="fonts/PretendardVariable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="admin.css" />
 </head>
 <body>
-  <div class="demo-banner no-print">시연용 공개 화면 · 도입 시 행정망 내부 전용 · 로그인 없이 누구나 볼 수 있습니다</div>
-
-  <header class="bar no-print">
-    <a class="brand" href="#/">빼곡 <span>행정 화면</span></a>
-    <div class="bar-right">
+  <header class="top no-print">
+    <a class="brand" href="index.html" aria-label="빼곡 지도로 가기">
+      <img class="brand-mark" src="logo.svg" alt="" width="22" height="22" />
+      <span class="wordmark">빼곡</span>
+    </a>
+    <nav class="page-tabs" aria-label="화면 이동">
+      <a href="index.html">지도</a>
+      <a href="admin.html#/" aria-current="page">행정 화면</a>
+    </nav>
+    <span class="region-chip" title="시범 지역"><i class="dot" aria-hidden="true"></i><span>청주시 서원구 사창동 · 건물 <b id="hdr-bldg">2,448</b>동</span></span>
+    <span class="demo-chip" title="로그인 없이 누구나 볼 수 있는 시연 화면입니다">시연용 · 도입 시 행정망 내부 전용</span>
+    <div class="top-right">
       <select id="role" class="ctl" title="역할은 첫 화면과 상황판 카드 순서만 바꿉니다 (권한 차이 없음)" aria-label="역할">
         <option value="review">법안 검토 담당</option>
         <option value="approve">결재·관리</option>
@@ -23,8 +31,19 @@
         <button type="button" data-mode="work" title="평이한 용어로 할 일 중심">실무</button>
         <button type="button" data-mode="audit" title="판정 규칙·검증·원본 규칙을 함께 표시">심사·검증</button>
       </div>
-      <button type="button" class="btn ghost" id="tour-btn">둘러보기</button>
-      <a class="btn ghost" href="index.html">지도</a>
+      <div class="settings">
+        <button type="button" class="icon-btn" id="settings-btn" aria-label="설정" aria-haspopup="true" aria-expanded="false" aria-controls="settings-menu" title="설정">
+          <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3 5.5h8M15 5.5h2M3 10h2M9 10h8M3 14.5h6M13 14.5h4"/><circle cx="13" cy="5.5" r="2"/><circle cx="7" cy="10" r="2"/><circle cx="11" cy="14.5" r="2"/></svg>
+        </button>
+        <div class="menu hidden" id="settings-menu" aria-label="설정">
+          <label class="menu-row" for="pref-ai">
+            <span><b>질의 도우미 사용</b><small>끄면 외부 AI 서버에 연결하지 않습니다. 행정망에서는 끄세요.</small></span>
+            <input type="checkbox" id="pref-ai" class="switch" role="switch" />
+          </label>
+          <button type="button" class="menu-row" id="tour-btn"><span><b>사용법 둘러보기</b><small>화면 구성을 차례로 짚어 봅니다</small></span></button>
+          <button type="button" class="menu-row" id="role-btn"><span><b>역할 다시 고르기</b><small>첫 화면 안내를 다시 엽니다</small></span></button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -41,15 +60,17 @@
   </div>
 
   <footer class="status no-print" id="status">
-    <span>판정 규칙 v1 (judge.js)</span>
+    <span>판정 규칙 v1</span>
     <span>법안 <b id="st-bills">-</b>건 · 건물 <b id="st-bldg">-</b>동</span>
-    <span>진행 기록: 이 브라우저에만 저장</span>
+    <span>진행 기록은 이 브라우저에만 저장</span>
     <button type="button" class="linkish" id="privacy-btn">개인정보 처리 안내</button>
     <span class="spacer"></span>
     <span id="st-ai"><i class="dot"></i>질의 도우미 확인 중</span>
+    <button type="button" class="ask-fab" id="ask-fab" aria-label="질의 도우미 열기">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z"/></svg>질의 도우미
+    </button>
   </footer>
 
-  <button type="button" class="ask-fab no-print" id="ask-fab">질의 도우미</button>
   <section class="ask-panel no-print hidden" id="ask-panel" aria-label="질의 도우미">
     <header><b>질의 도우미</b><span class="tag">AI · 공개 법안 자료만 근거</span><button type="button" class="x" id="ask-close" aria-label="닫기">×</button></header>
     <div class="ask-log" id="ask-log">

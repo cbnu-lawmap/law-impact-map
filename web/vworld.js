@@ -173,6 +173,10 @@
               lightMode();
             }, 500);
             viewer.camera.moveEnd.addEventListener(lightMode);
+            // 항공사진 색을 눌러(채도 낮춤) 색칠한 건물이 먼저 눈에 들어오게 한다.
+            // 브이월드가 나중에 영상 레이어를 더 넣을 수 있어, 레이어가 들어올 때마다 다시 맞춘다.
+            softenImagery();
+            viewer.imageryLayers.layerAdded.addEventListener(function (l) { softenLayer(l); viewer.scene.requestRender(); });
           }
           resolve();
         } else if (Date.now() - t0 > READY_TIMEOUT_MS) {
@@ -189,6 +193,19 @@
         else if (p instanceof Cesium.PrimitiveCollection && hideModels(p)) changed = true;
       }
       return changed;
+    }
+
+    var IMAGERY_TONE = { saturation: 0.4, brightness: 0.95, contrast: 1.0 };
+    function softenLayer(l) {
+      if (!l) return;
+      l.saturation = IMAGERY_TONE.saturation;
+      l.brightness = IMAGERY_TONE.brightness;
+      l.contrast = IMAGERY_TONE.contrast;
+    }
+    function softenImagery() {
+      var L = viewer.imageryLayers;
+      for (var i = 0; i < L.length; i++) softenLayer(L.get(i));
+      viewer.scene.requestRender();
     }
 
     function lightMode() {
