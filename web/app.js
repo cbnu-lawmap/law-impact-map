@@ -77,6 +77,8 @@
   if (window.vw && window.vw.Map && window.VWorldMap && !wantBasic) {
     // 데이터를 받는 동안 브이월드 지도를 먼저 띄운다
     engine = "vworld";
+    // 브이월드 하단 바를 숨기는 대신 출처를 고지 줄에 표시
+    document.getElementById("map-note").textContent += " · 지도 © 국토교통부 브이월드 (참고용)";
     vmap = VWorldMap.create({
       mapId: "map",
       realModels: wantReal,
