@@ -1,11 +1,17 @@
 import os, csv, re, time, requests
 from dotenv import load_dotenv
 
+from pathlib import Path
+
+# 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
 load_dotenv()
 KEY = os.getenv("ASSEMBLY_API_KEY")
 URL = "https://open.assembly.go.kr/portal/openapi/BPMBILLSUMMARY"
 
-with open("data/bills_candidates_v2.csv", encoding="utf-8-sig") as f:
+with open(DATA / "bills_candidates_v2.csv", encoding="utf-8-sig") as f:
     cands = list(csv.DictReader(f))
 
 out = []
@@ -31,7 +37,7 @@ for i, r in enumerate(cands, 1):
         print(f"{i} / {len(cands)}")
     time.sleep(0.2)
 
-with open("data/bills_summary.csv", "w", newline="", encoding="utf-8-sig") as f:
+with open(DATA / "bills_summary.csv", "w", newline="", encoding="utf-8-sig") as f:
     w = csv.DictWriter(f, fieldnames=list(out[0].keys()))
     w.writeheader()
     w.writerows(out)

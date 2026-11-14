@@ -1,7 +1,13 @@
 import csv
 from collections import Counter
 
-with open("data/bills_raw.csv", encoding="utf-8-sig") as f:
+from pathlib import Path
+
+# 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+with open(DATA / "bills_raw.csv", encoding="utf-8-sig") as f:
     reader = csv.DictReader(f)
     rows = list(reader)
     fields = reader.fieldnames
@@ -42,7 +48,7 @@ print("\n[법 이름별 건수 상위 40개]")
 for n, c in Counter(law(r["BILL_NAME"]) for r in cands).most_common(40):
     print(f"  {n}: {c}")
 
-with open("data/bills_candidates_v2.csv", "w", newline="", encoding="utf-8-sig") as f:
+with open(DATA / "bills_candidates_v2.csv", "w", newline="", encoding="utf-8-sig") as f:
     w = csv.DictWriter(f, fieldnames=fields)
     w.writeheader()
     w.writerows(cands)
