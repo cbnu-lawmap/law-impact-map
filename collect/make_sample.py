@@ -1,6 +1,12 @@
 import csv
 
-with open("data/bills_summary.csv", encoding="utf-8-sig") as f:
+from pathlib import Path
+
+# 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
+with open(DATA / "bills_summary.csv", encoding="utf-8-sig") as f:
     rows = [r for r in csv.DictReader(f) if r["SUMMARY"]]
 
 PICKS = [
@@ -31,7 +37,7 @@ for phrase, label, limit in PICKS:
 
 fields = ["BILL_NO", "BILL_ID", "BILL_NAME", "COMMITTEE", "PROPOSE_DT",
           "선정이유", "매칭문구", "DETAIL_LINK", "SUMMARY"]
-with open("data/sample_bills.csv", "w", newline="", encoding="utf-8-sig") as f:
+with open(DATA / "sample_bills.csv", "w", newline="", encoding="utf-8-sig") as f:
     w = csv.DictWriter(f, fieldnames=fields)
     w.writeheader()
     w.writerows([{k: s[k] for k in fields} for s in sample])

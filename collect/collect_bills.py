@@ -1,13 +1,19 @@
 import os, csv, time, requests
 from dotenv import load_dotenv
 
+from pathlib import Path
+
+# 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
+ROOT = Path(__file__).resolve().parent.parent
+DATA = ROOT / "data"
+
 load_dotenv()
 KEY = os.getenv("ASSEMBLY_API_KEY")
 SERVICE = "nzmimeepazxkubdpn"
 URL = f"https://open.assembly.go.kr/portal/openapi/{SERVICE}"
 PSIZE = 100
 
-os.makedirs("data", exist_ok=True)
+DATA.mkdir(exist_ok=True)
 rows = []
 page = 1
 
@@ -29,7 +35,7 @@ while True:
     time.sleep(0.3)
 
 if rows:
-    with open("data/bills_raw.csv", "w", newline="", encoding="utf-8-sig") as f:
+    with open(DATA / "bills_raw.csv", "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
