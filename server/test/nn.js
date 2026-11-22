@@ -40,7 +40,8 @@ test("char_wb TF-IDF: 낱말 앞뒤 공백, 2~3글자, sublinear, l2", () => {
 // 노트북이 내보낸 모델: check 칸에 넣어 둔 입력과 Keras 예측을 서버 계산과 비교
 const dir = path.join(__dirname, "..", "..", "web", "data", "models");
 if (fs.existsSync(dir)) {
-  fs.readdirSync(dir).filter((f) => f.endsWith(".json")).forEach((f) => {
+  // 가중치(layers)가 든 모델만 대조한다. pass_prediction.json 은 성능·기준값만 담고 예측은 bills.json 의 pass_prob 로 쓴다
+  fs.readdirSync(dir).filter((f) => f.endsWith(".json") && JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).layers).forEach((f) => {
     test("내보낸 모델 " + f + ": Keras 예측과 서버 계산이 같음", () => {
       const json = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
       assert.ok(Array.isArray(json.check) && json.check.length, "check 예시가 없음");
