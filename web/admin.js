@@ -170,6 +170,42 @@
     return propsPromise;
   }
 
+  // 기준 교차 확인 (collect/crosscheck_criteria.py → data/crosscheck.json). 법안 상세·판정 규칙 화면에서만 받는다
+  var crossPromise = null;
+  function loadCross() {
+    if (!crossPromise) crossPromise = getJSON("data/crosscheck.json").catch(function () { crossPromise = null; return null; });
+    return crossPromise;
+  }
+  var XC_TAG = { "교차 확인됨": "done", "확인 필요": "check", "단일 출처": "wait" };
+  function xcChip(s) { return '<span class="tag ' + (XC_TAG[s] || "") + '">' + esc(s) + "</span>"; }
+  function xcCell(v) { return v ? esc(v) : '<span class="muted">-</span>'; }
+  var XC_NOTE = "세 출처 모두 자동 추출입니다. 교차 확인됨은 출처끼리 수치가 같다는 뜻이고, 사람이 확인했다는 뜻은 아닙니다.";
+  // 법안 1건의 출처별 기준 표 (우리 AI / 규칙 기반 / 팀원 AI)
+  function crossTable(items, withNo) {
+    return '<div class="table-wrap"><table class="dt"><thead><tr>' + (withNo ? "<th>법안</th>" : "") +
+      "<th>기준</th><th>우리 AI</th><th>규칙 기반</th><th>팀원 AI</th><th>판정</th><th>메모</th></tr></thead><tbody>" +
+      items.map(function (it) {
+        return "<tr>" + (withNo ? '<td style="white-space:nowrap"><a href="#/bill/' + esc(it.no) + '">' + esc(it.no) + "</a></td>" : "") +
+          '<td style="white-space:nowrap">' + esc(it.attr) + "</td><td>" + xcCell(it.ours) + "</td><td>" + xcCell(it.rule) + "</td><td>" +
+          xcCell(it.team) + '</td><td style="white-space:nowrap">' + xcChip(it.status) + '</td><td class="small muted">' + xcCell(it.note) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+  function crossSection(no) {
+    return loadCross().then(function (X) {
+      var b = X && X.bills[no];
+      if (!b) return "";
+      return '<h3>기준 교차 확인 <span class="tag wait">AI 추출 · 사람 확인 전</span></h3>' +
+        '<p class="small muted" style="margin:-4px 0 8px">같은 법안의 기준을 세 출처에서 나란히 봅니다. ' + esc(XC_NOTE) + "</p>" +
+        crossTable(b.items, false);
+    });
+  }
+  function fillCross(no) {
+    crossSection(no).then(function (html) {
+      var box = document.getElementById("xc-box");
+      if (box && location.hash === "#/bill/" + no) box.innerHTML = html;
+    });
+  }
+
   // 법안 1건 판정: 건물마다 결과를 계산해 둔다 (같은 법안은 한 번만)
   function judgeBill(no) {
     if (D.judged[no]) return D.judged[no];
@@ -589,9 +625,11 @@
       $view.innerHTML = billHead(b) + links + progressBox(no) +
         '<div class="note-box">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않아 건물 판정이 없습니다. ' +
         "AI 기준 추출 단계에서 판정할 예정입니다.</div>" +
-        '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>";
+        '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>" +
+        '<div id="xc-box"></div>';
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      fillCross(no);
       return;
     }
 
@@ -618,6 +656,7 @@
       html += '<div class="card"><h3 style="margin-top:0">결론과 사유별 동수</h3><p style="margin:0 0 10px">' + esc(demo.conclusion) + "</p>" +
         reasonTable(J) + "</div>";
       html += "</div>";
+      html += '<div id="xc-box"></div>';
 
       html += "<h3>건물 명부</h3>";
       html += '<p class="small muted" style="margin:-4px 0 8px">확인 결과를 기록하면 적중률이 나옵니다 (온지붕 현장 확인 방식). ' +
@@ -635,6 +674,7 @@
       drawRoster(no);
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      fillCross(no);
       document.getElementById("r-csv").addEventListener("click", function () {
         var rows = J.rows.filter(function (r) { return r.status === ui.roster.tab; });
         var c = checks[no] || {};
@@ -914,7 +954,29 @@
       card("V-03", "분야 자동 분류 확신도", "참고", "확신도 0.9 이상 " + fmt(hi) + "건 · 0.6 미만 " + fmt(lo) + "건 (전체 " + fmt(D.bills.length) + "건). 낮은 법안은 분야 필터에서 빠지거나 잘못 들어갈 수 있음") +
       card("V-04", "기준 추출", "보류", "판정한 법안 " + judgedNos.length + "건 — " + methodSummary() + ". AI 추출 건은 원문 문구·수치를 자동 대조했지만 담당자 검토 전. 나머지 " + fmt(D.bills.length - judgedNos.length) + "건은 AI 추출(원문 수치 자동 대조) 단계에서 판정 예정") +
       card("V-05", "질의 도우미 답의 숫자", "채택", "서버가 답에 나온 숫자를 근거 자료와 대조해, 근거에 없는 숫자는 경고로 표시");
+    html += '<div id="xc-rules"><p class="muted small">기준 교차 확인을 불러오는 중…</p></div>';
     $view.innerHTML = html;
+    loadCross().then(function (X) {
+      var box = document.getElementById("xc-rules");
+      if (!box || location.hash !== "#/rules") return;
+      if (!X) { box.innerHTML = '<p class="muted small">기준 교차 확인 자료(data/crosscheck.json)를 불러오지 못했습니다.</p>'; return; }
+      var items = [], allOk = 0, someOk = 0;
+      judgedNos.forEach(function (no) {
+        var b = X.bills[no];
+        var mine = b ? b.items.filter(function (it) { return it.ours; }) : [];
+        var ok = mine.filter(function (it) { return it.status === "교차 확인됨"; }).length;
+        if (mine.length && ok === mine.length) allOk++;
+        else if (ok) someOk++;
+        mine.forEach(function (it) { items.push(Object.assign({ no: no }, it)); });
+      });
+      var sum = X.statuses.map(function (s) { return s + " " + fmt(X.summary[s] || 0) + "건"; }).join(" · ");
+      box.innerHTML = card("V-06", "기준 교차 확인", "참고",
+        "우리 AI 추출 · 규칙 기반(criteria_rule.csv) · 팀원 AI 추출(PR #20, 미검토)을 법안 × 기준 종류마다 비교. " +
+        "출처 중 하나라도 있는 법안 " + fmt(Object.keys(X.bills).length) + "건, " + sum + ".<br>" +
+        "판정한 " + judgedNos.length + "건 중 기준 전부 교차 확인됨 " + allOk + "건 · 일부만 " + someOk + "건. " + esc(XC_NOTE)) +
+        '<p class="small muted" style="margin:0 0 8px">판정한 법안의 기준만 보입니다 <span class="tag wait">AI 추출 · 사람 확인 전</span></p>' +
+        crossTable(items, true);
+    });
   }
 
   // ---------------------------------------------------------------- 화면: 데이터·한계
