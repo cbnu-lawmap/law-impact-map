@@ -488,12 +488,14 @@ def main():
             pass_pred = {r["BILL_NO"]: round(float(r["PASS_PROB"]), 3) for r in csv.DictReader(f) if r.get("PASS_PROB")}
     bills = []
     summaries = {}
+    full = {}   # 서버(검토 에이전트)용 제안이유 전문. 화면용 bills.json 은 300자로 자른다
     with open(os.path.join(DATA, "bills_summary.csv"), encoding="utf-8-sig") as f:
         for r in csv.DictReader(f):
             summaries[r["BILL_NO"]] = r["SUMMARY"]
             pr = pred.get(r["BILL_NO"], {})
             s = re.sub(r"^\s*제안이유(\s*및\s*주요내용)?\s*", "", r["SUMMARY"] or "")
             s = re.sub(r"\s+", " ", s).strip()
+            full[r["BILL_NO"]] = s
             field = int(pr["FIELD_PRED"]) if pr.get("FIELD_PRED") else None
             bills.append({
                 "no": r["BILL_NO"],
@@ -516,6 +518,7 @@ def main():
     print("  심사 단계:", dict(Counter(b["stage"] for b in bills)))
     print("  통과 가능성 예측:", sum("pass_prob" in b for b in bills), "건")
     dump({"fields": FIELD_NAMES, "bills": bills}, "bills.json")
+    dump({"note": "제안이유 전문 (머리말 제거, 공백 정리). 검토 에이전트가 기준을 뽑을 때 쓴다", "summaries": full}, "summaries.json")
 
     # 4) 판정 시범
     props = [ft["properties"] for ft in feats]
