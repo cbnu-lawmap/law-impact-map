@@ -281,11 +281,11 @@
   function buildingCard(p) {
     var demo = currentDemo();
     var rows = [
-      ["주용도 코드", val(p.usability)],
+      ["주용도", Judge.isEmpty(p.usability) ? val(null) : esc(Judge.useName(p.usability))],
       ["연면적", Judge.isEmpty(p.totalarea) ? val(null) : fmt(p.totalarea) + "㎡"],
       ["지상층수", val(p.grnd_flr, "층")],
       ["사용승인일", Judge.isEmpty(p.useapr_day) ? val(null) : dateText(p.useapr_day)],
-      ["구조 코드", val(p.strct_cd)],
+      ["구조", Judge.isEmpty(p.strct_cd) ? val(null) : esc(Judge.structName(p.strct_cd))],
       ["PNU", val(p.pnu)],
     ];
     var html = '<div class="bcard"><h4>건물 속성</h4><table>' +
