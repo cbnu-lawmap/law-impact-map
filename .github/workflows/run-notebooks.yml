@@ -1,0 +1,52 @@
+# 학습 노트북 실행 (Colab 과 비슷한 리눅스 + 파이썬 3.12 + TensorFlow)
+# main 이 아닌 브랜치에 notebooks/ 를 올리면 노트북을 처음부터 끝까지 실행하고,
+# 실행 결과(그래프·숫자)가 남은 노트북과 노트북이 만든 파일(모델·예측)을 같은 브랜치에 커밋한다.
+# 데이터는 노트북 안에서 GitHub raw(main)에서 읽고, 없으면 저장소의 data/ 를 읽는다.
+name: Run notebooks
+
+on:
+  push:
+    branches-ignore: [main]
+    paths: ["notebooks/**.ipynb", ".github/workflows/run-notebooks.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: notebooks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  run:
+    # 봇이 실행 결과를 커밋한 푸시는 다시 돌리지 않는다
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          sudo apt-get -qq install -y fonts-nanum > /dev/null
+          pip install -q tensorflow-cpu pandas scikit-learn matplotlib nbconvert nbclient ipykernel
+      - name: Execute
+        env:
+          NB_LOCAL_DATA: ${{ github.workspace }}/data
+        run: |
+          cd notebooks
+          for nb in *.ipynb; do
+            echo "== $nb"
+            jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 "$nb"
+          done
+      - name: Commit results
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf input
+          git add notebooks web/data/models data/*_pred.csv 2>/dev/null || true
+          git diff --cached --quiet && { echo "바뀐 것 없음"; exit 0; }
+          git commit -m "chore: 노트북 실행 결과 저장 (Actions)"
+          git push origin HEAD:${{ github.ref_name }}
