@@ -493,6 +493,7 @@
       }
       if (key === "field") return fieldName(b.field);
       if (key === "pg") return PG_KEYS.indexOf(pgOf(b.no));
+      if (key === "pass") return b.pass_prob == null ? -1 : b.pass_prob;
       return b[key] || "";
     };
     list.sort(function (a, b) {
@@ -552,12 +553,12 @@
     });
     document.getElementById("f-csv").addEventListener("click", function () {
       downloadCSV("빼곡_법안검토목록_" + stamp() + ".csv",
-        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
+        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "통과 가능성(신경망 추정)", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
           return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
-            .concat([PG[pgOf(b.no)].label, b.link]);
+            .concat([passPct(b), PG[pgOf(b.no)].label, b.link]);
         }));
     });
     drawBillTable();
@@ -594,7 +595,7 @@
     var allOn = rows.length && rows.every(function (b) { return s.sel[b.no]; });
     var html = '<table class="dt"><thead><tr><th class="chk no-print"><input type="checkbox" id="sel-all"' + (allOn ? " checked" : "") +
       ' aria-label="이 쪽 모두 선택"></th>' + th("no", "의안번호") + th("name", "법안명") + th("committee", "위원회") +
-      th("date", "제안일") + th("stage", "심사 단계") + th("field", "분야") + th("impact", "사창동 영향") + th("pg", "진행") + "</tr></thead><tbody>";
+      th("date", "제안일") + th("stage", "심사 단계") + th("field", "분야") + th("impact", "사창동 영향") + th("pass", "통과 가능성", "num") + th("pg", "진행") + "</tr></thead><tbody>";
     html += rows.map(function (b) {
       var d = D.demos[b.no];
       var impact = d
@@ -604,8 +605,8 @@
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
         '</td><td class="num">' + esc(b.date) + "</td><td>" + stageTag(b, true) + "</td><td>" + esc(fieldName(b.field)) +
-        (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + "</td><td>" + pgMark(b.no) + "</td></tr>";
-    }).join("") || '<tr><td colspan="9" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
+        (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + '</td><td class="num small muted">' + passPct(b) + "</td><td>" + pgMark(b.no) + "</td></tr>";
+    }).join("") || '<tr><td colspan="10" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
     html += "</tbody></table>" + pager(s.page, pages, list.length);
     var box = document.getElementById("bill-table");
     box.innerHTML = html;
@@ -651,7 +652,13 @@
     return '<div class="crumb no-print"><a href="#/bills">← 법안 검토 목록</a></div>' +
       "<h2>" + esc(b.name) + '</h2><p class="lead">의안번호 ' + esc(b.no) + " · " + esc(b.committee) + " · 제안 " + esc(b.date) +
       " · " + stageTag(b, true) + " · " + fieldTag(b) + " · " + pgMark(b.no) +
-      (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>";
+      (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>" + passLine(b);
+  }
+  // 통과 가능성: notebooks/pass_prediction.ipynb 의 신경망 추정 (21대 국회 처리 결과로 학습)
+  function passPct(b) { return b.pass_prob == null ? "" : Math.round(b.pass_prob * 100) + "%"; }
+  function passLine(b) {
+    return b.pass_prob == null ? "" : '<p class="small muted" style="margin-top:-6px">통과 가능성(신경망 추정) ' + passPct(b) +
+      " · 21대 국회 처리 결과로 학습 · 법안의 좋고 나쁨과 무관</p>";
   }
   function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }
   // 판정한 법안의 기준 추출 방법 요약 (예: "사람 추출 2건 · AI 추출 24건(검토 전)")

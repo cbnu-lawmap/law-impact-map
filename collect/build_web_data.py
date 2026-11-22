@@ -5,7 +5,7 @@
   web/data/buildings.geojson  사창동 건물 (판정용 속성 6개만, 좌표 소수 6자리)
                               지상층수가 빈 건물에는 신경망 추정 est_flr·est_p (참고용, 판정에 안 씀)
   web/data/boundary.geojson   사창동 행정동 경계
-  web/data/bills.json         법안 목록 (bills_summary + bills_field_pred + bills_stage, BILL_NO 기준)
+  web/data/bills.json         법안 목록 (bills_summary + bills_field_pred + bills_stage + bills_pass_pred, BILL_NO 기준)
   web/data/demo_rules.json    판정 시범(사람 추출 2건 + AI 추출·원문 대조) 규칙과 결과 동수
 
 개인정보 보호: 건물명(bld_nm), 동명(dong_nm) 등 이름이 섞일 수 있는 필드는 넣지 않는다.
@@ -480,6 +480,12 @@ def main():
     # 심사 단계 (docs/review_stage.md). 없는 법안은 stage 를 비워 둔다.
     with open(os.path.join(DATA, "bills_stage.csv"), encoding="utf-8-sig") as f:
         stage = {r["BILL_NO"]: r for r in csv.DictReader(f)}
+    # 통과 가능성 (notebooks/pass_prediction.ipynb 가 만든 신경망 추정). 파일이 없거나 없는 법안은 pass_prob 를 넣지 않는다.
+    pass_path = os.path.join(DATA, "bills_pass_pred.csv")
+    pass_pred = {}
+    if os.path.exists(pass_path):
+        with open(pass_path, encoding="utf-8-sig") as f:
+            pass_pred = {r["BILL_NO"]: round(float(r["PASS_PROB"]), 3) for r in csv.DictReader(f) if r.get("PASS_PROB")}
     bills = []
     summaries = {}
     with open(os.path.join(DATA, "bills_summary.csv"), encoding="utf-8-sig") as f:
@@ -503,9 +509,12 @@ def main():
                 "in_progress": (stage[r["BILL_NO"]]["IN_PROGRESS"] == "Y"
                                 if r["BILL_NO"] in stage else None),
             })
+            if r["BILL_NO"] in pass_pred:
+                bills[-1]["pass_prob"] = pass_pred[r["BILL_NO"]]
     bills.sort(key=lambda b: (b["date"], b["no"]), reverse=True)
     mark_added(bills)
     print("  심사 단계:", dict(Counter(b["stage"] for b in bills)))
+    print("  통과 가능성 예측:", sum("pass_prob" in b for b in bills), "건")
     dump({"fields": FIELD_NAMES, "bills": bills}, "bills.json")
 
     # 4) 판정 시범
