@@ -28,8 +28,7 @@ jobs:
       - name: Probe VWorld (no key)
         run: |
           # 키 없이 불러 브이월드가 러너 IP에서 응답하는지만 본다 (정상이면 200 + PARAM_REQUIRED)
-          curl -s -o probe.txt -w "HTTP %{http_code}
-" --max-time 20             "https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_UQ111&format=json&geomFilter=POINT(127.46%2036.634)" || true
+          curl -s -o probe.txt -w "HTTP %{http_code} " --max-time 20 "https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_UQ111&format=json&geomFilter=POINT(127.46%2036.634)" || true
           head -c 300 probe.txt || true; echo; rm -f probe.txt
       - name: Collect
         env:
