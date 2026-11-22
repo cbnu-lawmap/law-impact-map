@@ -14,18 +14,12 @@
  * OpenAI에는 공개 법안 텍스트와 질문만 보낸다.
  */
 
-const DATA_BASE = process.env.DATA_BASE || "https://cbnu-lawmap.github.io/law-impact-map/data/";
+const { DATA_BASE, cors, createLimiter, clientIp, readBody, PII, PERSONAL_JUDGE, PII_ANSWER, PERSONAL_ANSWER, numbersNotInContext, maskKey } = require("../lib/common");
+
 const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
-const ALLOWED = [
-  "https://cbnu-lawmap.github.io",
-  "http://localhost:8000",
-  "http://localhost:8766",
-  "http://127.0.0.1:8000",
-];
-const RATE = { windowMs: 60000, max: 10 };
+const limited = createLimiter({ windowMs: 60000, max: 10 });
 
 let cache = null; // { at, bills, fields, demos, region, total }
-const hits = new Map(); // ip -> [시각]
 
 async function loadData() {
   if (cache && Date.now() - cache.at < 10 * 60000) return cache;
@@ -38,28 +32,6 @@ async function loadData() {
   cache = { at: Date.now(), bills: b.bills, fields: b.fields, demos, region: d.region, total: d.total };
   return cache;
 }
-
-function cors(req, res) {
-  const origin = req.headers.origin || "";
-  if (ALLOWED.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-    res.setHeader("Vary", "Origin");
-    res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  }
-  return ALLOWED.includes(origin);
-}
-
-function limited(ip) {
-  const now = Date.now();
-  const list = (hits.get(ip) || []).filter((t) => now - t < RATE.windowMs);
-  list.push(now);
-  hits.set(ip, list);
-  return list.length > RATE.max;
-}
-
-const PII = /(01[016789][-\s]?\d{3,4}[-\s]?\d{4})|(\d{6}[-\s]?[1-4]\d{6})|([\w.+-]+@[\w-]+\.[\w.]+)/;
-const PERSONAL_JUDGE = /(우리\s*집|내\s*집|제\s*집|내\s*건물|제\s*건물|우리\s*건물|저희\s*(집|건물)).*(대상|해당|적용|걸리)/;
 
 // 어느 법안에나 나오는 말이라 검색에서 뺀다
 const STOP = new Set(["판정", "판정한", "결과", "요약", "요약해", "알려", "알려줘", "설명", "정리", "사창동", "영향", "건물", "어떤", "무엇", "뭐야", "있어", "해줘", "줘"]);
@@ -129,13 +101,6 @@ const SYSTEM = [
   "6. 6문장 이내, 공문체가 아닌 쉬운 존댓말로 쓴다.",
 ].join("\n");
 
-function numbersNotInContext(answer, ctx, q) {
-  const norm = (s) => s.replace(/,/g, "");
-  const hay = norm(ctx + " " + q);
-  const nums = (answer.match(/\d[\d,]*(\.\d+)?/g) || []).map(norm);
-  return Array.from(new Set(nums.filter((n) => Number(n) > 10 && !hay.includes(n))));
-}
-
 module.exports = async function handler(req, res) {
   const okOrigin = cors(req, res);
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
@@ -146,22 +111,21 @@ module.exports = async function handler(req, res) {
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   if (!okOrigin) { res.status(403).json({ error: "허용하지 않은 사이트입니다" }); return; }
 
-  const ip = String(req.headers["x-forwarded-for"] || "").split(",")[0].trim() || "unknown";
+  const ip = clientIp(req);
   if (limited(ip)) { res.status(429).json({ error: "질문이 너무 잦습니다. 1분 뒤에 다시 해 주세요." }); return; }
 
-  let body = req.body;
-  if (typeof body === "string") { try { body = JSON.parse(body); } catch (e) { body = {}; } }
+  const body = readBody(req);
   const q = String((body && body.q) || "").trim().slice(0, 300);
   const billNo = /^\d{7}$/.test(String(body && body.bill)) ? String(body.bill) : "";
   if (!q) { res.status(400).json({ error: "질문이 비어 있습니다" }); return; }
 
   if (PII.test(q)) {
-    res.status(200).json({ answer: "전화번호·주민등록번호·이메일 같은 개인정보는 받지 않습니다. 개인정보를 빼고 다시 질문해 주세요.", sources: [], fixed: true });
+    res.status(200).json({ answer: PII_ANSWER, sources: [], fixed: true });
     return;
   }
   if (PERSONAL_JUDGE.test(q)) {
     res.status(200).json({
-      answer: "개별 집이나 건물이 법 적용 대상인지는 이 도우미가 판정하지 않습니다. 화면의 판정은 건축물 데이터로 추정한 결과이며 법률 판단이 아닙니다. 법안별 집계와 건물 명부를 확인하신 뒤, 최종 판단은 담당 부서 검토와 시행령 확정 후 기준을 따라 주세요.",
+      answer: PERSONAL_ANSWER,
       sources: [], fixed: true,
     });
     return;
@@ -199,8 +163,7 @@ module.exports = async function handler(req, res) {
       model: MODEL,
     });
   } catch (e) {
-    // 오류 문구에 키 일부가 섞여 나오지 않게 가린다
-    const msg = String(e.message || e).replace(/sk-[\w*-]+/g, "sk-***").slice(0, 200);
+    const msg = maskKey(e); // 오류 문구에 키 일부가 섞여 나오지 않게 가린다
     res.status(502).json({ error: "답을 만들지 못했습니다: " + msg });
   }
 };
