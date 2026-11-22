@@ -9,9 +9,9 @@
 - nzmimeepazxkubdpn (국회의원 발의법률안): 회부일·상정일·위원회 처리일, 대표발의자·공동발의자 의원 코드(MONA_CD)
 - TVBPMBILL11 (법률안 심사 및 처리): 상정일 교차 확인, 빈 값 채우기
 - ALLBILLV2 (의안정보 통합): 상정일(JRCMIT_PRSNT_DT) 교차 확인, 빈 값 채우기
-- ALLNAMEMBER (역대 국회의원 인적사항): 의원 코드별 그 대수의 소속 위원회
-- nktulghcadyhmiqxi (위원회 위원 명단, 지금 22대): 22대 소속 위원회 보충, ALLNAMEMBER 묶음 순서 확인
-  (위원회 소속은 그 대수 동안 한 번이라도 속했는지로 본다. 전반기·후반기는 나누지 않는다)
+- nqbeopthavwwfbekw (역대 국회의원 위원회 경력, 대수별) + nyzrglyvagmrypezq (지금 의원 위원회 경력):
+  의원 코드별 위원회 경력과 기간. **제안일에** 소관 위원회 위원이었는지 본다 (제안 시점에 알 수 있는 정보).
+  ALLNAMEMBER 의 소속 위원회(BLNG_CMIT_NM)는 가장 최근 대수 것만 있어 21대 소속을 알 수 없으므로 쓰지 않는다.
 
 저장 원칙
 - 의원 이름·정당은 저장하지도 찍지도 않는다. 의원 코드는 메모리 안에서 위원회 소속을 맞추는 데만 쓰고 버린다.
@@ -23,9 +23,9 @@
 """
 import csv
 import os
+import re
 import sys
 import time
-from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -91,43 +91,46 @@ def split_list(s):
 LOOK = ("국토교통위원회", "행정안전위원회", "환경노동위원회")
 
 
-def member_committees(people, era, reverse, verbose=False):
-    """의원 코드 -> 그 대수에 소속했던 위원회 집합 (이름은 쓰지 않음).
-    ALLNAMEMBER 는 대수 목록(GTELT_ERACO, 쉼표)과 소속 위원회 묶음(BLNG_CMIT_NM, '/')을 따로 준다.
-    묶음 순서가 대수 순서와 같은지 반대인지 설명서가 없어, 지금 위원회 명단과 맞춰 보고 고른다(reverse)."""
-    out, mismatch, shapes = {}, 0, Counter()
-    for r in people:
-        eras = [e.strip() for e in (r.get("GTELT_ERACO") or "").split(",") if e.strip()]
-        if era not in eras:
-            continue
-        segs = [s for s in (r.get("BLNG_CMIT_NM") or "").split("/") if s.strip()]
-        shapes[(len(eras), len(segs))] += 1
-        if reverse:
-            segs = segs[::-1]
-        if len(segs) == len(eras):
-            seg = segs[eras.index(era)]
-        elif len(segs) == 1 and era == eras[-1]:   # 묶음이 하나뿐이면 가장 최근 대수의 것으로만 본다
-            seg = segs[0]
-        else:              # 어느 대수의 묶음인지 알 수 없으면 판정하지 않는다
-            mismatch += 1
-            continue
-        out[r.get("NAAS_CD")] = {cmt(c) for c in seg.split(",") if c.strip()}
-    if verbose:
-        print(f"  {era} 의원의 (대수 수, 묶음 수) 분포:", dict(sorted(shapes.items())))
-    return out, mismatch
+def dot_date(s):
+    try:
+        y, m, dd = (int(x) for x in s.strip().split("."))
+        return date(y, m, dd)
+    except (ValueError, AttributeError):
+        return None
 
 
-def choose_order(people, roster):
-    """22대 지금 명단(의원 코드, 위원회)과 가장 잘 맞는 묶음 순서를 고른다. 숫자만 찍는다."""
-    best = None
-    for rev in (False, True):
-        mem, _ = member_committees(people, "제22대", rev)
-        pairs = [(c, k) for c, k in roster if c in mem]
-        hit = sum(k in mem[c] for c, k in pairs) / max(1, len(pairs))
-        print(f"  묶음 순서 {'반대' if rev else '그대로'}: 22대 명단 {len(pairs)}건 중 일치 {hit:.1%}")
-        if best is None or hit > best[1]:
-            best = (rev, hit)
-    return best[0]
+def committee_spells(age):
+    """의원 코드 -> [(위원회 이름, 시작일, 끝일)] (그 대수). 이름은 쓰지 않는다.
+    nqbeopthavwwfbekw (역대 의원 위원회 경력, 대수별) + nyzrglyvagmrypezq (지금 의원 위원회 경력, 모든 대수)
+    PROFILE_SJ = 위원회 이름(앞에 '제21대' 가 붙기도 함), FRTO_DATE = 'YYYY.MM.DD ~ YYYY.MM.DD' (끝이 비면 지금도 위원)"""
+    unit = f"1000{age}"
+    rows = fetch_all("nqbeopthavwwfbekw", {"PROFILE_UNIT_CD": unit}, f"역대 의원 위원회 경력 {age}대")
+    rows += [r for r in fetch_all("nyzrglyvagmrypezq", {}, "지금 의원 위원회 경력") if str(r.get("PROFILE_UNIT_CD")) == unit]
+    out, seen = {}, set()
+    for r in rows:
+        name = re.sub(r"^제\d+대", "", (r.get("PROFILE_SJ") or "").replace(" ", ""))
+        fr, _, to = (r.get("FRTO_DATE") or "").partition("~")
+        key = (r.get("MONA_CD"), name, fr.strip(), to.strip())
+        if not key[0] or not name or key in seen:
+            continue
+        seen.add(key)
+        out.setdefault(key[0], []).append((name, dot_date(fr), dot_date(to) if to.strip() else date.max))
+    n = sum(len(v) for v in out.values())
+    print(f"  {age}대 위원회 경력 {n}건, 의원 {len(out)}명, 날짜 못 읽은 경력 {sum(1 for v in out.values() for x in v if not x[1])}건, "
+          "위원회별 의원 수: " + ", ".join(f"{k} {sum(any(k in x[0] for x in v) for v in out.values())}명" for k in LOOK))
+    return out
+
+
+def in_committee(spells, code, committee, when):
+    """제안일(when)에 그 의원이 소관 위원회 위원이었으면 1, 아니면 0, 경력 자료가 없으면 None.
+    22대 기후에너지환경노동위원회는 이름 안에 환경노동위원회가 들어 있어 부분 일치로 같은 위원회로 본다."""
+    if code not in spells:
+        return None
+    base = committee[:-1] if committee.endswith("회") else committee   # '국토교통위원장' 같은 이름도 잡는다
+    for name, fr, to in spells[code]:
+        if base and base in name and (when is None or fr is None or fr <= when <= to):
+            return 1
+    return 0
 
 
 def main():
@@ -139,9 +142,6 @@ def main():
         21: [r["BILL_NO"] for r in csv.DictReader(open(DATA / "bills_history_21.csv", encoding="utf-8-sig"))],
         22: [r["BILL_NO"] for r in csv.DictReader(open(DATA / "bills_summary.csv", encoding="utf-8-sig"))],
     }
-    people = fetch_all("ALLNAMEMBER", {}, "역대 의원 소속 위원회")
-    roster = [(r.get("MONA_CD"), cmt(r.get("DEPT_NM"))) for r in fetch_all("nktulghcadyhmiqxi", {}, "위원회 위원 명단")]
-    reverse = choose_order(people, roster)
     for age, nos in targets.items():
         era = f"제{age}대"
         print(f"== {era}: 대상 {len(nos)}건")
@@ -153,12 +153,7 @@ def main():
         except ApiError as e:
             print("  ALLBILLV2 실패, 건너뜀:", e)
             allb = {}
-        mem, mismatch = member_committees(people, era, reverse, verbose=True)
-        if age == 22:      # 지금 위원회 명단으로 보충
-            for c, k in roster:
-                mem.setdefault(c, set()).add(k)
-        print(f"  {era} 의원 {len(mem)}명의 소속 위원회 확보 (어느 대수 묶음인지 몰라 뺀 의원 {mismatch}명), 위원 수: "
-              + ", ".join(f"{k} {sum(k in s for s in mem.values())}명" for k in LOOK))
+        spells = committee_spells(age)
 
         out, agree, disagree, filled, coded, matched = [], 0, 0, 0, 0, 0
         for no in nos:
@@ -178,17 +173,16 @@ def main():
             cmt_proc = d(g("CMT_PROC_DT"))
             committee = cmt(g("COMMITTEE") or g("CURR_COMMITTEE"))
 
-            kind = (t or {}).get("PROPOSER_KIND") or ("의원" if g("RST_MONA_CD") else "")
             publ = split_list((a or {}).get("PUBL_PROPOSER"))
             publ_codes = split_list((a or {}).get("PUBL_MONA_CD"))
             rep = g("RST_MONA_CD")
-            rep_in = ""
-            if rep and rep in mem:
-                rep_in = int(committee in mem[rep])
-            known = [c for c in publ_codes if c in mem]
+            r_in = in_committee(spells, rep, committee, prop)
+            rep_in = "" if r_in is None else r_in
+            flags = [in_committee(spells, c, committee, prop) for c in publ_codes]
+            known = [x for x in flags if x is not None]
             coded += len(publ_codes)
             matched += len(known)
-            in_n = sum(committee in mem[c] for c in known)
+            in_n = sum(known)
             res = (g("CMT_PROC_RESULT_CD") or "") + " " + (g("PROC_RESULT") or "")
             dp = days(prop, present)
             out.append({
