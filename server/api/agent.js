@@ -159,17 +159,22 @@ function openaiLLM(key, model) {
 // AGENT_MOCK_SCRIPT=tokens 이면 호출마다 토큰을 많이 쓴 것처럼 센다(토큰 제한 시험),
 // AGENT_MOCK_SCRIPT=invent 이면 근거 없는 규칙으로 판정을 시도한다(규칙 거절 시험),
 // AGENT_MOCK_SCRIPT=nosplit 이면 위임만 든 규칙으로 판정을 시도한다(판정할 기준 없음 시험).
+// AGENT_MOCK_SCRIPT=models 이면 직접 학습한 모델 도구(classify_field, predict_pass)도 부른다.
 // AGENT_MOCK_SCRIPT=nodeleg 이면 추출 결과에서 위임을 뺀다(모델이 위임을 빠뜨린 경우 시험).
 function mockLLM() {
   const script = process.env.AGENT_MOCK_SCRIPT || "normal";
   const tokens = script === "tokens" ? 5000 : 400;
-  const ORDER = ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"];
+  const ORDER = script === "models"
+    ? ["get_bill", "classify_field", "predict_pass", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"]
+    : ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"];
   const WHY = {
     get_bill: "법안 요약과 진행 단계를 먼저 확인합니다.",
     extract_criteria: "요약에서 건물 기준을 뽑아 원문과 대조합니다.",
     crosscheck: "뽑은 기준이 다른 출처와 같은지 봅니다.",
     judge_buildings: "원문 대조를 통과한 기준으로 사창동 건물을 집계합니다.",
     draft_review: "모은 결과로 검토 초안을 씁니다.",
+    classify_field: "직접 학습한 분야 분류 신경망으로 분야를 확인합니다.",
+    predict_pass: "직접 학습한 통과 가능성 신경망 결과를 봅니다.",
   };
   let n = 0;
   const callTool = (name, args) => ({
