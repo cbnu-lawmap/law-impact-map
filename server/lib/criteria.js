@@ -14,6 +14,9 @@
 const { USE_NAMES } = require("./judge");
 const USE_TERMS = require("./use-terms"); // data/building_use_codes.csv 에서 만든 시설 이름표
 const NOT_IN_QUOTE = "근거 문장에 없는 값 제외";
+const DELEG_NO_PHRASE = "근거 문장에 위임 문구(대통령령·부령·조례로 정하는) 없음";
+const DELEG_LONG_VALUE = "위임 값이 기준 이름이 아님 (너무 긺)";
+const DELEG_VALUE_MAX = 15; // 예: 규모, 용도, 소방시설 기준, 국토교통부령
 
 const REF_DATE = "2026-11-01"; // collect/build_web_data.py 의 REF_DATE 와 같게
 const MAX_QUOTE = 160;
@@ -159,6 +162,9 @@ function verify(candidates, summary) {
     else if (c.attr === "연면적" && !AREA_UNIT.test(quote)) why = NOT_IN_QUOTE + " (면적 단위)";
     else if (c.attr === "층수" && !new RegExp("(?<![\\d,])" + c.value + "\\s*층").test(quote)) why = NOT_IN_QUOTE + " (" + c.value + "층)";
     else if (c.attr === "위임" && !quote.replace(/\s+/g, "").includes(c.value.replace(/\s+/g, ""))) why = NOT_IN_QUOTE + " (" + c.value + ")";
+    // 위임은 근거 문장에 실제 위임 문구(대통령령·부령·조례로 정하는 …)가 있어야 하고, 값은 짧은 기준 이름이어야 한다
+    else if (c.attr === "위임" && !new RegExp(DELEG_RE.source).test(quote)) why = DELEG_NO_PHRASE;
+    else if (c.attr === "위임" && c.value.replace(/\s+/g, "").length > DELEG_VALUE_MAX) why = DELEG_LONG_VALUE;
     if (why) { dropped.push({ attr: c.attr, value: c.value, why }); return; }
     if (c.attr === "용도") {
       // 코드마다 따로 본다: 근거에 시설 이름이 있는 코드만 남기고 나머지는 버린다
@@ -201,4 +207,4 @@ function ruleTexts(rule) {
   return out;
 }
 
-module.exports = { NOT_IN_QUOTE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };
+module.exports = { NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };

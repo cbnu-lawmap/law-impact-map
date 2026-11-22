@@ -339,7 +339,7 @@ async function run(D, no, note, llm) {
           "quote 는 요약 원문을 한 글자도 바꾸지 말고 그대로 옮긴 160자 이내 문구. 용도 value 는 주용도 코드 배열 (" +
           Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자. " +
           "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
-          "위임 value 는 시행령(대통령령)에 넘긴 기준 이름(용도 또는 규모). 확실하지 않으면 넣지 않는다.",
+          "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.",
           "[요약]\n" + bill.summary, CALL_MAX_TOKENS, true);
         state.tokens += r.tokens;
         const items = JSON.parse(r.text).items;

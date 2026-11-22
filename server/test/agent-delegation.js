@@ -147,6 +147,34 @@ test("위임 문구 찾기: 대통령령·부령·조례, 문구는 원문의 �
   assert.deepStrictEqual(Criteria.findDelegation("연면적 200제곱미터 이상인 건축물에 적용함."), []);
 });
 
+test("모델이 낸 위임 값: 근거 문장에 위임 문구가 없거나 값이 문장 통째면 버림 (2206436 사례)", async () => {
+  const s = "현행법은 해체 신고 대상 건축물 전부에 대해 전문가가 해체계획서를 검토하여 서명 날인하도록 함. 이에 대통령령으로 정하는 규모 이하의 건축물은 검토를 생략함.";
+  const noPhrase = "현행법은 해체 신고 대상 건축물 전부에 대해 전문가가 해체계획서를 검토하여 서명 날인하도록 함.";
+  const withPhrase = "이에 대통령령으로 정하는 규모 이하의 건축물은 검토를 생략함.";
+  // 실제로 2206436 에서 모델이 낸 값: 위임 문구 없는 설명 문장을 통째로
+  let v = Criteria.verify([{ attr: "위임", value: "해체 신고 대상 건축물 전부에 대해 전문가가 해체계획서를 검토하여 서명 날인하도록 함", quote: noPhrase }], s);
+  assert.deepStrictEqual(v.rule, {});
+  assert.strictEqual(v.dropped[0].why, Criteria.DELEG_NO_PHRASE);
+  // 짧은 값이라도 근거에 위임 문구가 없으면 버림
+  v = Criteria.verify([{ attr: "위임", value: "해체 신고", quote: noPhrase }], s);
+  assert.strictEqual(v.dropped[0].why, Criteria.DELEG_NO_PHRASE);
+  // 위임 문구가 있어도 값이 문장 통째면 버림
+  v = Criteria.verify([{ attr: "위임", value: "대통령령으로 정하는 규모 이하의 건축물은 검토를 생략함", quote: withPhrase }], s);
+  assert.strictEqual(v.dropped[0].why, Criteria.DELEG_LONG_VALUE);
+  // 위임 문구가 있고 값이 기준 이름이면 받아들임
+  v = Criteria.verify([{ attr: "위임", value: "규모", quote: withPhrase }], s);
+  assert.deepStrictEqual(v.rule, { 위임: ["규모"] });
+});
+
+test("실제 2206436 요약: 위임 문구가 없어 어떤 위임 값도 받아들이지 않음", async () => {
+  const s = bills.find((b) => b.no === "2206436").summary;
+  assert.deepStrictEqual(Criteria.findDelegation(s), []);
+  const t = Criteria.normText(s);
+  const quote = t.slice(0, Math.min(160, t.indexOf(".") + 1 || 160));
+  const v = Criteria.verify([{ attr: "위임", value: quote.slice(0, 8), quote }], s);
+  assert.strictEqual(v.rule.위임, undefined, JSON.stringify(v));
+});
+
 (async () => {
   let fail = 0;
   for (const [name, fn] of tests) {
