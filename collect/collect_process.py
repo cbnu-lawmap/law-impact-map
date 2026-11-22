@@ -10,7 +10,8 @@
 - TVBPMBILL11 (법률안 심사 및 처리): 상정일 교차 확인, 빈 값 채우기
 - ALLBILLV2 (의안정보 통합): 상정일(JRCMIT_PRSNT_DT) 교차 확인, 빈 값 채우기
 - ALLNAMEMBER (역대 국회의원 인적사항): 의원 코드별 그 대수의 소속 위원회
-- nktulghcadyhmiqxi (위원회 위원 명단, 지금 22대): 22대 소속 위원회 보충
+- nktulghcadyhmiqxi (위원회 위원 명단, 지금 22대): 22대 소속 위원회 보충, ALLNAMEMBER 묶음 순서 확인
+  (위원회 소속은 그 대수 동안 한 번이라도 속했는지로 본다. 전반기·후반기는 나누지 않는다)
 
 저장 원칙
 - 의원 이름·정당은 저장하지도 찍지도 않는다. 의원 코드는 메모리 안에서 위원회 소속을 맞추는 데만 쓰고 버린다.
@@ -86,23 +87,43 @@ def split_list(s):
     return [x.strip() for x in (s or "").split(",") if x.strip()]
 
 
-def member_committees(era):
-    """의원 코드 -> 그 대수에 소속했던 위원회 집합 (이름은 쓰지 않음)"""
+LOOK = ("국토교통위원회", "행정안전위원회", "환경노동위원회")
+
+
+def member_committees(people, era, reverse):
+    """의원 코드 -> 그 대수에 소속했던 위원회 집합 (이름은 쓰지 않음).
+    ALLNAMEMBER 는 대수 목록(GTELT_ERACO, 쉼표)과 소속 위원회 묶음(BLNG_CMIT_NM, '/')을 따로 준다.
+    묶음 순서가 대수 순서와 같은지 반대인지 설명서가 없어, 지금 위원회 명단과 맞춰 보고 고른다(reverse)."""
     out, mismatch = {}, 0
-    for r in fetch_all("ALLNAMEMBER", {}, "역대 의원 소속 위원회"):
-        eras = [e.strip() for e in (r.get("GTELT_ERACO") or "").split(",")]
+    for r in people:
+        eras = [e.strip() for e in (r.get("GTELT_ERACO") or "").split(",") if e.strip()]
         if era not in eras:
             continue
         segs = (r.get("BLNG_CMIT_NM") or "").split("/")
+        if reverse:
+            segs = segs[::-1]
         if len(segs) == len(eras):
             seg = segs[eras.index(era)]
         elif len(segs) == 1:
             seg = segs[0]
-        else:              # 대수와 묶음 수가 안 맞으면 마지막 묶음(가장 최근)을 쓴다
-            seg, mismatch = segs[-1], mismatch + 1
+        else:              # 대수와 묶음 수가 안 맞으면 판정하지 않는다
+            mismatch += 1
+            continue
         out[r.get("NAAS_CD")] = {cmt(c) for c in seg.split(",") if c.strip()}
-    print(f"  {era} 의원 {len(out)}명의 소속 위원회 확보 (대수·묶음 수 불일치 {mismatch}명)")
-    return out
+    return out, mismatch
+
+
+def choose_order(people, roster):
+    """22대 지금 명단(의원 코드, 위원회)과 가장 잘 맞는 묶음 순서를 고른다. 숫자만 찍는다."""
+    best = None
+    for rev in (False, True):
+        mem, _ = member_committees(people, "제22대", rev)
+        pairs = [(c, k) for c, k in roster if c in mem]
+        hit = sum(k in mem[c] for c, k in pairs) / max(1, len(pairs))
+        print(f"  묶음 순서 {'반대' if rev else '그대로'}: 22대 명단 {len(pairs)}건 중 일치 {hit:.1%}")
+        if best is None or hit > best[1]:
+            best = (rev, hit)
+    return best[0]
 
 
 def main():
@@ -114,6 +135,9 @@ def main():
         21: [r["BILL_NO"] for r in csv.DictReader(open(DATA / "bills_history_21.csv", encoding="utf-8-sig"))],
         22: [r["BILL_NO"] for r in csv.DictReader(open(DATA / "bills_summary.csv", encoding="utf-8-sig"))],
     }
+    people = fetch_all("ALLNAMEMBER", {}, "역대 의원 소속 위원회")
+    roster = [(r.get("MONA_CD"), cmt(r.get("DEPT_NM"))) for r in fetch_all("nktulghcadyhmiqxi", {}, "위원회 위원 명단")]
+    reverse = choose_order(people, roster)
     for age, nos in targets.items():
         era = f"제{age}대"
         print(f"== {era}: 대상 {len(nos)}건")
@@ -125,10 +149,12 @@ def main():
         except ApiError as e:
             print("  ALLBILLV2 실패, 건너뜀:", e)
             allb = {}
-        mem = member_committees(era)
+        mem, mismatch = member_committees(people, era, reverse)
         if age == 22:      # 지금 위원회 명단으로 보충
-            for r in fetch_all("nktulghcadyhmiqxi", {}, "위원회 위원 명단"):
-                mem.setdefault(r.get("MONA_CD"), set()).add(cmt(r.get("DEPT_NM")))
+            for c, k in roster:
+                mem.setdefault(c, set()).add(k)
+        print(f"  {era} 의원 {len(mem)}명의 소속 위원회 확보 (대수·묶음 수 불일치로 뺀 의원 {mismatch}명), 위원 수: "
+              + ", ".join(f"{k} {sum(k in s for s in mem.values())}명" for k in LOOK))
 
         out, agree, disagree, filled, coded, matched = [], 0, 0, 0, 0, 0
         for no in nos:
