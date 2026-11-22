@@ -111,6 +111,42 @@ test("위임만 든 규칙 호출 뒤 시범 규칙이 있으면 다음 호출�
   assert.strictEqual(j.rule_source, "판정 시범 규칙");
 });
 
+test("모델이 위임을 빠뜨려도 원문 위임 문구로 위임 보류 (2211980)", async () => {
+  process.env.AGENT_MOCK_SCRIPT = "nodeleg";
+  const r = await call({ bill: NO_DEMO, note: "위임 빠뜨림" });
+  delete process.env.AGENT_MOCK_SCRIPT;
+  const j = r.body;
+  assert.ok(!j.rule || !j.rule.위임, "추출 규칙에는 위임이 없어야 함: " + JSON.stringify(j.rule));
+  assert.ok(j.delegation.length >= 1 && j.delegation.every((d) => bills.find((b) => b.no === NO_DEMO).summary.replace(/\s+/g, " ").includes(d.quote)));
+  assert.strictEqual(j.hold, "판정 보류: 시행령(대통령령 등)에 위임돼 기준 확정 전");
+  assert.strictEqual(j.hold_todo, "시행령 입법예고 확인");
+  const ex = j.steps.find((s) => s.tool === "extract_criteria");
+  assert.ok(/위임 문구는 원문에서 직접 확인/.test(ex.summary), ex.summary);
+  assert.ok(/시행령 입법예고 확인/.test(j.draft) && !/조문 대비표/.test(j.draft), j.draft);
+});
+
+test("위임 문구도 기준도 없으면 원문 확인 보류", async () => {
+  const no = "2222991";
+  const b = bills.find((x) => x.no === no);
+  assert.ok(!Object.keys(Criteria.extract(b.summary).rule).length && !Criteria.findDelegation(b.summary).length, "시험 법안 조건");
+  const r = await call({ bill: no });
+  const j = r.body;
+  assert.ok(!j.steps.some((s) => s.tool === "judge_buildings"));
+  assert.strictEqual(j.counts, null);
+  assert.strictEqual(j.hold, "판정 보류: 요약문에서 판정 기준을 찾지 못함");
+  assert.strictEqual(j.hold_todo, "법안 원문(조문 대비표) 확인");
+  assert.deepStrictEqual(j.delegation, []);
+  assert.ok(/법안 원문\(조문 대비표\) 확인/.test(j.draft) && !/시행령 입법예고/.test(j.draft), j.draft);
+});
+
+test("위임 문구 찾기: 대통령령·부령·조례, 문구는 원문의 부분 문자열", async () => {
+  const s = "세부 사항은 국토교통부령으로 정한다. 시·도 조례로 정하는 범위에서 감면함. 대통령령으로 정하는 규모 이상의 건축물에 적용함.";
+  const d = Criteria.findDelegation(s);
+  assert.deepStrictEqual(d.map((x) => x.by + ":" + x.value), ["국토교통부령:국토교통부령", "조례:범위", "대통령령:규모"]);
+  d.forEach((x) => assert.ok(s.includes(x.quote), x.quote));
+  assert.deepStrictEqual(Criteria.findDelegation("연면적 200제곱미터 이상인 건축물에 적용함."), []);
+});
+
 (async () => {
   let fail = 0;
   for (const [name, fn] of tests) {

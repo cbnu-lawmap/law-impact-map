@@ -108,9 +108,30 @@ function extractCandidates(summary) {
     const hit = g.exec(text);
     if (hit) out.push({ attr: "용도", value: codes, quote: quoteAround(text, hit.index, hit[0].length) });
   });
-  const deleg = /대통령령으로\s*정하는[^.]{0,30}?(용도|규모)/g;
-  while ((m = deleg.exec(text))) {
-    out.push({ attr: "위임", value: m[1], quote: quoteAround(text, m.index, m[0].length) });
+  // 판정 규칙에 넣는 위임은 예전과 같이 "대통령령으로 정하는 … 용도/규모" 만 (판정 수가 바뀌지 않게)
+  findDelegation(text).filter((d) => d.by === "대통령령" && (d.value === "용도" || d.value === "규모"))
+    .forEach((d) => out.push({ attr: "위임", value: d.value, quote: d.quote }));
+  return out;
+}
+
+// 위임 문구: "대통령령으로 정하는 규모", "국토교통부령으로 정한다", "조례로 정하는" 등
+const DELEG_RE = /(대통령령|총리령|[가-힣]{1,10}부령|[가-힣]{0,6}조례)(?:으로|로)\s*정(?:하는|한다|함|할|해)([^.]{0,30}?(용도|규모|기준|범위|요건))?/g;
+
+/**
+ * 요약 원문에서 위임 문구를 코드로 찾는다 (모델 결과와 상관없이 같은 답).
+ * 값은 위임한 기준 이름(용도·규모·기준 …)이고, 없으면 위임한 법령 이름(대통령령 …). 값과 문구는 항상 원문에 있다.
+ */
+function findDelegation(summary) {
+  const text = normText(summary);
+  const out = [], seen = new Set();
+  let m;
+  DELEG_RE.lastIndex = 0;
+  while ((m = DELEG_RE.exec(text))) {
+    const value = m[3] || m[1];
+    const quote = quoteAround(text, m.index, m[0].length);
+    if (seen.has(value + "|" + quote)) continue;
+    seen.add(value + "|" + quote);
+    out.push({ attr: "위임", value, quote, by: m[1] });
   }
   return out;
 }
@@ -180,4 +201,4 @@ function ruleTexts(rule) {
   return out;
 }
 
-module.exports = { NOT_IN_QUOTE, useTermIn, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };
+module.exports = { NOT_IN_QUOTE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };

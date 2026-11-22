@@ -1360,7 +1360,8 @@
         }).join("") + "</ul>";
       if (j.rule) html += '<div class="small muted">적용 규칙: ' + esc(ruleText(j.rule).join(" · ")) + "</div>";
     } else if (j.hold) {
-      html += '<p class="small agent-warn">' + esc(j.hold) + ". 건물 판정은 하지 않았습니다. 담당자 할 일: 시행령 입법예고 확인.</p>";
+      html += '<p class="small agent-warn">' + esc(j.hold) + ". 건물 판정은 하지 않았습니다. 담당자 할 일: " + esc(j.hold_todo || "법안 원문 확인") + ".</p>";
+      if (j.delegation && j.delegation.length) html += '<div class="small muted">원문 위임 문구: ' + esc(j.delegation.map(function (d) { return d.quote; }).join(" / ")) + "</div>";
     } else {
       html += '<p class="small muted">근거가 확인된 기준이 없어 건물 판정은 하지 않았습니다.</p>';
     }
