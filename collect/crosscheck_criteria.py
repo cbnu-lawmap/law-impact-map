@@ -6,6 +6,9 @@
   B. 규칙 기반      data/criteria_rule.csv (extract_criteria.py, PR #18)
   C. 팀원 AI 추출   data/ai_feature_extraction.csv (PR #20, 머지 전)
                     파일이 없으면 git show origin/feature/ai-feature-extraction:data/ai_feature_extraction.csv 로 읽는다
+  D. 원문 정규식    (--docs 를 줄 때만) data/bill_docs/<의안번호>_원문.txt 에 server/lib/criteria.js 의 뽑기를 돌린 것
+                    (node server/scripts/compare-bill-docs.js --rules). 이때는 기본 출력 파일을 건드리지 않고
+                    data/criteria_crosscheck_docs.csv 만 쓰고, 원문 출처를 넣기 전후 판정 수를 출력한다
 
 기준 종류(ATTRIBUTE): 용도 / 연면적 / 층수 / 연도(경과연수·사용승인) / 기타(세대수·높이·바닥면적 등)
 
@@ -28,6 +31,7 @@
   python collect/crosscheck_criteria.py
   python collect/crosscheck_criteria.py --team 경로/ai_feature_extraction.csv
   python collect/crosscheck_criteria.py --candidates      # 노후 후보 표(마크다운)도 출력
+  python collect/crosscheck_criteria.py --docs data/bill_docs   # 원문 정규식을 넷째 출처로 넣어 비교
 """
 import argparse
 import csv
@@ -329,6 +333,31 @@ def load_team(path):
     return out, names, excluded, used
 
 
+# ---------------------------------------------------------------- D. 원문 정규식 (--docs)
+DOC_SOURCE = ("doc", "원문 정규식")
+
+
+def load_docs(docs_dir):
+    """의안 원문 글에서 server/lib/criteria.js 로 뽑은 규칙을 우리 AI 와 같은 꼴의 항목으로"""
+    raw = subprocess.run(["node", os.path.join(ROOT, "server", "scripts", "compare-bill-docs.js"), "--rules", docs_dir],
+                         capture_output=True, check=True).stdout
+    out = {}
+    for no, r in json.loads(raw.decode("utf-8")).items():
+        items = []
+        if r.get("용도"):
+            items.append(mk("용도", codes=sorted(r["용도"])))
+        for k in ("연면적", "층수"):
+            for b, op in (("min", ">="), ("max", "<=")):
+                if k in r and b in r[k]:
+                    items.append(mk(k, op, float(r[k][b])))
+        if "사용승인" in r:
+            items.append(mk("연도", ">=", float(int(REF_DATE[:4]) - int(str(r["사용승인"]["before"])[:4]))))
+        for it in items:
+            it["src"] = "ours"  # 표기(사용승인 … 경과)를 우리 AI 와 같게
+        out[no] = items
+    return out
+
+
 # ---------------------------------------------------------------- 비교
 def legal_check(no, coded, comparable):
     """출처가 뽑은 용도가 법안 글의 시설 이름(별표1 분류)과 하나도 겹치지 않으면 그 출처 이름과 설명을 돌려준다"""
@@ -403,25 +432,27 @@ def cell(items):
     return "; ".join(out)
 
 
-def build(team_path):
+def build(team_path, docs=None):
     ours, ours_info = load_ours()
     rule, rule_names = load_rule()
     team, team_names, team_excl, team_used = load_team(team_path)
+    srcs = [("ours", ours), ("rule", rule), ("team", team)] + ([("doc", docs)] if docs is not None else [])
     with open(os.path.join(WEB, "bills.json"), encoding="utf-8") as f:
         bill_names = {b["no"]: b["name"] for b in json.load(f)["bills"]}
-    nos = sorted(set(ours) | set(rule) | set(team), key=lambda x: int(x), reverse=True)
+    nos = sorted(set(ours) | set(rule) | set(team) | set(docs or {}), key=lambda x: int(x), reverse=True)
     rows = []
     for no in nos:
         name = bill_names.get(no) or rule_names.get(no) or team_names.get(no, "")
         for attr in ATTRS:
             by_src = {s: [it for it in src.get(no, []) if it["attr"] == attr]
-                      for s, src in (("ours", ours), ("rule", rule), ("team", team))}
+                      for s, src in srcs}
             if not any(by_src.values()):
                 continue
             status, notes, _ = compare(no, attr, by_src, team_excl.get(no, ""))
             rows.append(OrderedDict([
                 ("BILL_NO", no), ("BILL_NAME", name), ("ATTRIBUTE", attr),
                 ("OURS", cell(by_src["ours"])), ("RULE_BASED", cell(by_src["rule"])), ("TEAM_AI", cell(by_src["team"])),
+            ] + ([("DOC_REGEX", cell(by_src["doc"]))] if docs is not None else []) + [
                 ("STATUS", status), ("NOTE", " / ".join(notes)),
             ]))
     return rows, ours, ours_info, rule, team, team_used
@@ -508,7 +539,11 @@ def main():
     ap = argparse.ArgumentParser(description="기준 교차 확인 (우리 AI · 규칙 기반 · 팀원 AI)")
     ap.add_argument("--team", default=os.path.join(DATA, "ai_feature_extraction.csv"), help="팀원 AI 추출 CSV 경로")
     ap.add_argument("--candidates", action="store_true", help="노후(경과연수) 후보 동수 표를 출력")
+    ap.add_argument("--docs", help="의안 원문 글 폴더 (예: data/bill_docs). 주면 원문 정규식을 넷째 출처로 넣어 비교만 한다")
     a = ap.parse_args()
+
+    if a.docs:
+        return main_docs(a)
 
     print("기준 교차 확인")
     rows, ours, ours_info, rule, team, team_used = build(a.team)
@@ -534,6 +569,44 @@ def main():
                       + (f"  ({i['note']})" if i["note"] else ""))
     if a.candidates:
         candidates(ours, rule, team)
+
+
+def main_docs(a):
+    """원문 정규식 출처를 넣기 전후 판정 수 비교. 기본 출력(criteria_crosscheck.csv, crosscheck.json)은 건드리지 않는다"""
+    print("기준 교차 확인 (+ 원문 정규식)")
+    before, ours, *_ = build(a.team)
+    docs = load_docs(os.path.abspath(a.docs))
+    SOURCES.append(DOC_SOURCE)
+    after, *_ = build(a.team, docs)
+    path = os.path.join(DATA, "criteria_crosscheck_docs.csv")
+    with open(path, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=list(after[0].keys()))
+        w.writeheader()
+        w.writerows(after)
+    print(f"  data/criteria_crosscheck_docs.csv: {len(after)}행 (원문 있는 법안 {len(docs)}건)")
+
+    def count(rows, nos=None):
+        c = Counter(r["STATUS"] for r in rows if nos is None or r["BILL_NO"] in nos)
+        return ", ".join(f"{s} {c.get(s, 0)}" for s in (ST_OK, ST_CHECK, ST_ONE))
+    pilot = set(ours)
+    print(f"\n판정 시범 26건 행: 전 [{count(before, pilot)}] → 후 [{count(after, pilot)}]")
+    print(f"원문 있는 법안 {len(docs)}건 행: 전 [{count(before, set(docs))}] → 후 [{count(after, set(docs))}]")
+    print(f"전체 행: 전 [{count(before)}] → 후 [{count(after)}]")
+    old = {(r["BILL_NO"], r["ATTRIBUTE"]): r for r in before}
+    print("\n바뀐 행 (판정 시범 26건):")
+    for r in after:
+        k = (r["BILL_NO"], r["ATTRIBUTE"])
+        o = old.get(k)
+        if r["BILL_NO"] in pilot and (not o or o["STATUS"] != r["STATUS"]):
+            print(f"  [{k[0]}] {k[1]}: {o['STATUS'] if o else '(행 없음)'} → {r['STATUS']}  우리={r['OURS'] or '-'} | 규칙={r['RULE_BASED'] or '-'}"
+                  f" | 팀원={r['TEAM_AI'] or '-'} | 원문={r['DOC_REGEX'] or '-'}" + (f"  ({r['NOTE']})" if r["NOTE"] else ""))
+    print("\n바뀐 행 (추가 후보 법안):")
+    for r in after:
+        k = (r["BILL_NO"], r["ATTRIBUTE"])
+        o = old.get(k)
+        if r["BILL_NO"] in docs and r["BILL_NO"] not in pilot and (not o or o["STATUS"] != r["STATUS"]):
+            print(f"  [{k[0]}] {k[1]}: {o['STATUS'] if o else '(행 없음)'} → {r['STATUS']}  규칙={r['RULE_BASED'] or '-'}"
+                  f" | 팀원={r['TEAM_AI'] or '-'} | 원문={r['DOC_REGEX'] or '-'}" + (f"  ({r['NOTE']})" if r["NOTE"] else ""))
 
 
 if __name__ == "__main__":

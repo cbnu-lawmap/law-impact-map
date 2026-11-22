@@ -18,3 +18,5 @@ CSV 데이터 보관 폴더
 점검 결과는 [docs/data_check.md](../docs/data_check.md) 참고.
 
 웹 시제품용 경량 데이터는 `collect/build_web_data.py`로 `web/data/`에 생성한다 (건물명 등 이름 필드 제외, `cheongju_buildings_footprint.geojson`은 출처 불명이라 사용하지 않음).
+
+`bill_docs/`: 의안정보시스템(likms)에서 받은 의안 원문·검토보고서 PDF 에서 뽑은 글 (판정 시범 26건 + 위원회 상정 10건, 2026-11-23). PDF 원본은 저장소에 넣지 않는다. 받은 주소·쪽수·글자 수는 `bill_docs/index.csv`, 다시 받기는 `collect/fetch_bill_docs.py`, 분석은 [docs/bill_docs_analysis.md](../docs/bill_docs_analysis.md).
