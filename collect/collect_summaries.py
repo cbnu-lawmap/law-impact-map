@@ -1,7 +1,9 @@
-import os, csv, re, time, requests
+import os, csv, re, sys, time
 from dotenv import load_dotenv
 
 from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from http_retry import get_json  # noqa: E402  (시간 초과 재시도)
 
 # 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
 ROOT = Path(__file__).resolve().parent.parent
@@ -34,7 +36,7 @@ for i, r in enumerate(cands, 1):
     params = {"KEY": KEY, "TYPE": "json", "pIndex": 1, "pSize": 5, "BILL_NO": r["BILL_NO"]}
     summary = ""
     try:
-        body = requests.get(URL, params=params, timeout=30).json()
+        body = get_json(URL, params, label=f"제안이유 {r['BILL_NO']}")
         if "BPMBILLSUMMARY" in body:
             rowlist = body["BPMBILLSUMMARY"][1]["row"]
             summary = (rowlist[0].get("SUMMARY") or "") if rowlist else ""  # API 가 null 을 주는 법안이 있음
