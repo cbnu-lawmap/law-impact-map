@@ -26,6 +26,7 @@ const {
 } = require("../lib/common");
 const Judge = require("../lib/judge");
 const Criteria = require("../lib/criteria");
+const { loadModel } = require("../lib/nn");
 
 const MAX_STEPS = 8;
 const TOKEN_CAP = 12000;
@@ -40,6 +41,8 @@ const TOOL_KO = {
   crosscheck: "출처별 기준 비교",
   judge_buildings: "건물 판정 집계",
   draft_review: "검토 초안 쓰기",
+  classify_field: "분야 분류 (직접 학습한 신경망)",
+  predict_pass: "통과 가능성 (직접 학습한 신경망)",
 };
 
 // ---------------------------------------------------------------- 데이터 (10분 저장)
@@ -58,7 +61,13 @@ async function loadData() {
   });
   const byNo = {};
   b.bills.forEach((v) => { byNo[v.no] = v; });
-  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props };
+  // 직접 학습한 모델 (notebooks/*.ipynb 가 web/data/models/ 로 내보냄). 없으면 도구가 "모델 없음" 으로 답한다
+  const [fm, pm] = await Promise.all([
+    loadJson("models/field_classifier.json").catch(() => null),
+    loadJson("models/pass_prediction.json").catch(() => null),
+  ]);
+  const models = { field: fm ? loadModel(fm) : null, pass: pm || null };
+  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models };
   return dataCache;
 }
 
@@ -96,6 +105,8 @@ const TOOLS = [
     },
   },
   { name: "draft_review", description: "지금까지 모은 결과로 담당자용 검토 초안 문단을 쓴다. 마지막에 한 번 부른다.", props: { no: noParam } },
+  { name: "classify_field", description: "팀이 직접 학습한 신경망(TF-IDF + Dense)으로 법안 제안이유의 분야(9개)를 분류하고 확률 상위 3개와 모델 시험 정확도를 돌려준다.", props: { no: noParam } },
+  { name: "predict_pass", description: "팀이 직접 학습한 신경망이 21대 국회 처리 결과로 학습해 계산한 이 법안의 통과(가결·대안반영) 가능성과 모델 시험 성능을 돌려준다. 추정이며 법안 내용의 옳고 그름과 무관하다.", props: { no: noParam } },
 ].map((t) => ({
   type: "function",
   function: {
@@ -107,7 +118,8 @@ const TOOLS = [
 
 const SYSTEM = [
   "너는 「빼곡」의 신규 법안 검토 도우미다. 지자체 담당 공무원이 법안 하나의 검토 초안을 만든다.",
-  "도구를 하나씩 골라 부른다. 보통 순서는 get_bill, extract_criteria, crosscheck, judge_buildings, draft_review 이다.",
+  "도구를 하나씩 골라 부른다. 보통 순서는 get_bill, classify_field, predict_pass, extract_criteria, crosscheck, judge_buildings, draft_review 이다.",
+  "classify_field 와 predict_pass 는 팀이 직접 학습한 모델이다. 결과는 추정이므로 초안에 확률과 함께 '모델 추정'이라고 쓴다.",
   "도구를 부를 때마다 reason 에 왜 부르는지 한국어 한 문장으로 쓴다.",
   "judge_buildings 의 rule 은 extract_criteria 결과의 use_rule 을 그대로 넘긴다. use_rule 이 null 이면(판정 보류) judge_buildings 를 부르지 말고 draft_review 로 넘어간다.",
   "숫자와 용도 코드를 지어내지 않는다. draft_review 를 부른 뒤에는 도구를 더 부르지 말고 '끝' 이라고만 답한다.",
@@ -228,7 +240,7 @@ const DELEG_CHECKED = "위임 문구는 원문에서 직접 확인";
 async function run(D, no, note, llm) {
   const bill = D.byNo[no];
   const demo = D.demos[no] || null;
-  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, delegation: [], draft: "", draftCtx: "", unverified: [] };
+  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, delegation: [], field: null, pass: null, draft: "", draftCtx: "", unverified: [] };
   const overBudget = () => state.tokens >= TOKEN_CAP;
 
   // 판정에 넘긴 규칙은 원문 대조를 통과한 규칙이나 판정 시범 규칙과 똑같아야 한다.
@@ -285,6 +297,9 @@ async function run(D, no, note, llm) {
       if (demo) lines.push("시범 규칙(" + demo.method + "): " + Object.entries(Criteria.ruleTexts(demo.rule)).map((x) => x.join(" ")).join(", ") + " | 근거 " + demo.source_text);
     }
     if (state.cross) lines.push("출처별 비교: " + state.cross.summary);
+    if (state.field) lines.push("분야(직접 학습 신경망 추정): " + state.field.top.map((t) => t.name + " " + Math.round(t.p * 100) + "%").join(", "));
+    if (state.pass) lines.push("통과 가능성(직접 학습 신경망 추정): " + Math.round(state.pass.p * 100) + "%" +
+      (state.pass.metrics.test_auc != null ? " (모델 시험 AUC " + state.pass.metrics.test_auc + ")" : ""));
     if (state.judged) {
       const c = state.judged.counts;
       lines.push(`판정(${D.region} 건물 ${fmt(D.total)}동, ${state.judged.source} ${Object.entries(Criteria.ruleTexts(state.judged.rule)).map((x) => x.join(" ")).join(", ")}): 대상 ${fmt(c["대상"])}동, 경계선 ${fmt(c["경계선"])}동, 비대상 ${fmt(c["비대상"])}동, 판정불가 ${fmt(c["판정불가"])}동`);
@@ -407,6 +422,32 @@ async function run(D, no, note, llm) {
     return { region: D.region, total: D.total, rule: clean, rule_source: ok.source, counts: J.counts, top_reasons: top };
   }
 
+  // 제안이유 머리말·공백 정리 (notebooks/field_classifier.ipynb 의 clean 과 같게)
+  function cleanSummary(t) {
+    return String(t || "").replace(/^\s*제안이유\s*(및\s*주요내용)?/, "").replace(/\s+/g, " ").trim();
+  }
+
+  function classifyField() {
+    const M = D.models && D.models.field;
+    if (!M) return { error: "분야 분류 모델 파일이 아직 없습니다 (models/field_classifier.json)" };
+    const prob = M.predict(cleanSummary(bill.summary));
+    const top = prob.map((p, i) => ({ field: M.labels[i], p })).sort((a, b) => b.p - a.p).slice(0, 3)
+      .map((x) => ({ field: x.field, name: (D.fields && D.fields[x.field]) || x.field, p: Math.round(x.p * 1000) / 1000 }));
+    state.field = { top, metrics: M.metrics, current: bill.field != null ? String(bill.field) : null };
+    return { top, current_field: state.field.current, current_name: bill.field != null && D.fields ? D.fields[bill.field] : null,
+      same_as_current: state.field.current === top[0].field, model: M.metrics };
+  }
+
+  function predictPass() {
+    const pm = D.models && D.models.pass;
+    if (!pm) return { error: "통과 가능성 모델 결과가 아직 없습니다 (models/pass_prediction.json)" };
+    const p = bill.pass_prob;
+    if (p === undefined || p === null) return { error: "이 법안은 모델 예측이 없습니다 (학습 뒤에 들어온 새 법안이면 다음 학습 때 반영)" };
+    state.pass = { p, metrics: pm.metrics || {} };
+    return { pass_prob: p, label: p >= (pm.threshold || 0.5) ? "통과 가능성 높음" : "통과 가능성 낮음", threshold: pm.threshold || 0.5, model: pm.metrics || {},
+      note: "21대 국회 처리 결과로 학습한 추정. 법안의 좋고 나쁨과 무관" };
+  }
+
   async function exec(name, args) {
     if (name !== "judge_buildings" && name !== "draft_review" && args.no && args.no !== no) return { error: "이번 검토 대상은 " + no + " 입니다" };
     if (name === "get_bill") {
@@ -417,6 +458,8 @@ async function run(D, no, note, llm) {
     if (name === "crosscheck") return crosscheck();
     if (name === "judge_buildings") return judgeBuildings(args.rule);
     if (name === "draft_review") return draftReview();
+    if (name === "classify_field") return classifyField();
+    if (name === "predict_pass") return predictPass();
     return { error: "모르는 도구" };
   }
 
@@ -442,6 +485,13 @@ async function run(D, no, note, llm) {
       const c = r.counts;
       return `${r.rule_source}으로 ${r.region} ${fmt(r.total)}동 중 대상 ${fmt(c["대상"])}, 경계선 ${fmt(c["경계선"])}, 비대상 ${fmt(c["비대상"])}, 판정불가 ${fmt(c["판정불가"])}`;
     }
+    if (name === "classify_field") {
+      const t = r.top[0];
+      return `${t.name} ${Math.round(t.p * 100)}%` + (r.top[1] ? `, 다음 ${r.top[1].name} ${Math.round(r.top[1].p * 100)}%` : "") +
+        (r.current_name ? (r.same_as_current ? " (목록 분야와 같음)" : ` (목록 분야 ${r.current_name}와 다름)`) : "") +
+        (r.model && r.model.test_acc != null ? ` · 모델 시험 정확도 ${Math.round(r.model.test_acc * 100)}%` : "");
+    }
+    if (name === "predict_pass") return `${r.label} (${Math.round(r.pass_prob * 100)}%, 모델 추정)` + (r.model && r.model.test_auc != null ? ` · 모델 시험 AUC ${r.model.test_auc}` : "");
     if (name === "draft_review") return "검토 초안 " + r.draft.length + "자" + (r.template ? " (정해진 틀로 작성)" : "") + (r.unverified.length ? ", 근거에 없는 숫자 " + r.unverified.length + "개" : "");
     return "";
   }
@@ -494,6 +544,8 @@ async function run(D, no, note, llm) {
     region: D.region,
     total: D.total,
     crosscheck: state.cross,
+    field_model: state.field || null,
+    pass_model: state.pass || null,
     needs_human_review: true,
     unverified: state.unverified,
     model: llm.name,
