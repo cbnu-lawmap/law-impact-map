@@ -16,6 +16,35 @@
 (function (global) {
   "use strict";
 
+  // 건축물대장 주용도 코드(대분류). 데이터에는 코드만 있어 이름은 화면에서 붙인다.
+  var USE_NAMES = {
+    "01000": "단독주택", "02000": "공동주택", "03000": "제1종근린생활시설", "04000": "제2종근린생활시설",
+    "05000": "문화및집회시설", "06000": "종교시설", "07000": "판매시설", "08000": "운수시설",
+    "09000": "의료시설", "10000": "교육연구시설", "11000": "노유자시설", "12000": "수련시설",
+    "13000": "운동시설", "14000": "업무시설", "15000": "숙박시설", "16000": "위락시설",
+    "17000": "공장", "18000": "창고시설", "19000": "위험물저장및처리시설", "20000": "자동차관련시설",
+    "21000": "동물및식물관련시설", "22000": "자원순환관련시설", "23000": "교정및군사시설",
+    "24000": "방송통신시설", "25000": "발전시설", "26000": "묘지관련시설", "27000": "관광휴게시설",
+    "28000": "장례시설",
+  };
+
+  // 화면·문서에 보일 용도 이름. 코드는 모르는 값일 때만 덧붙인다 (CSV에는 코드 열이 따로 있음)
+  function useName(code) {
+    if (isEmpty(code)) return "(없음)";
+    return USE_NAMES[code] || "기타 용도(코드 " + code + ")";
+  }
+
+  // 구조 코드 → 이름 (건축HUB 표제부 코드표, docs/data_check.md 4절)
+  var STRUCT_NAMES = {
+    "10": "조적구조", "11": "벽돌구조", "12": "블록구조", "19": "기타조적구조",
+    "21": "철근콘크리트구조", "31": "일반철골구조", "32": "경량철골구조",
+    "41": "철골콘크리트구조", "42": "철골철근콘크리트구조", "51": "일반목구조",
+  };
+  function structName(code) {
+    if (isEmpty(code)) return "(없음)";
+    return STRUCT_NAMES[code] || "기타 구조(코드 " + code + ")";
+  }
+
   var NEAR_RATIO = 0.1;
   var NEAR_YEARS = 1;
   var STATUSES = ["대상", "경계선", "비대상", "판정불가"];
@@ -84,7 +113,7 @@
     return { counts: counts, reasons: reasons };
   }
 
-  var api = { judge: judge, countAll: countAll, STATUSES: STATUSES, isEmpty: isEmpty };
+  var api = { judge: judge, countAll: countAll, STATUSES: STATUSES, isEmpty: isEmpty, USE_NAMES: USE_NAMES, useName: useName, structName: structName };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Judge = api;
 })(this);
