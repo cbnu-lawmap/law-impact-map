@@ -8,7 +8,7 @@
 
 <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=Python&logoColor=white" alt="Python" />
 <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=OpenAI&logoColor=white" alt="OpenAI" />
-<img src="https://img.shields.io/badge/RAG-0D8794?style=flat-square" alt="RAG" />
+<img src="https://img.shields.io/badge/Vercel-000000?style=flat-square&logo=Vercel&logoColor=white" alt="Vercel" />
 <img src="https://img.shields.io/badge/열린국회정보_Open_API-1F3A93?style=flat-square" alt="열린국회정보 Open API" />
 <img src="https://img.shields.io/badge/V--WORLD-2477FF?style=flat-square" alt="V-WORLD" />
 <img src="https://img.shields.io/badge/GeoJSON-111827?style=flat-square" alt="GeoJSON" />
@@ -33,9 +33,13 @@
 | :---: | --- |
 | 법안 수집 | 열린국회정보 Open API로 건축·주거·안전 분야 계류 법안 수집 |
 | 분야 분류 | 법안 텍스트를 분야(소방, 구조·노후, 주거 등)로 자동 분류 |
-| 기준 추출 | OpenAI + RAG로 법안 조문에서 `{용도, 면적, 층수, 연도}` 규칙 추출, 원문 수치와 자동 대조 |
+| 기준 추출 | 법안 요약문에서 `{용도, 면적, 층수, 연도}` 규칙 추출. 판정 시범 26건 중 24건은 Claude로 추출한 뒤 근거 문구가 원문에 그대로 있는지, 숫자가 근거에 있는지 자동 대조 (담당자 확인 전) |
+| 교차 확인 | 같은 법안을 세 방식(우리 AI 추출, 규칙 기반 추출, 팀원 AI 추출)으로 뽑아 같은 숫자면 「교차 확인됨」, 다르면 「확인 필요」 |
 | 건물 판정 | 규칙 × 건물 속성 → **대상 / 경계선 / 비대상 / 판정불가** |
-| 지도 시각화 | 법안 선택 시 대상 건물 채색, 건물 클릭 시 걸린 법안 목록 |
+| 지도 시각화 | 법안 선택 시 대상 건물 채색, 건물 클릭 시 속성과 판정 사유 |
+| 행정 화면 | 담당 공무원용 상황판, 법안 검토 목록(심사 단계 포함), 진행 관리, 검토서 인쇄·한글(HWPX) |
+| 질의 도우미 | 공개 법안 자료만 근거로 답하는 AI 질의 (`server/api/ask.js`) |
+| 검토 에이전트 | AI가 도구를 골라 법안 조회 → 기준 추출 → 교차 확인 → 건물 판정 → 검토서 초안까지 진행 (`server/api/agent.js`, 사람 확인 필요) |
 
 <br />
 
@@ -78,27 +82,42 @@
 
 ```mermaid
 flowchart LR
-A[열린국회정보 Open API] --> B[collect: 법안 수집·전처리]
-V[브이월드 WFS] --> C[collect: 건물 수집]
-B --> D[backend: 분야 분류]
-B --> E[backend: RAG + OpenAI 기준 추출]
-E --> F[원문 수치 대조 검증]
-F --> G[건물 판정 엔진]
-C --> G
-G --> H[(data: CSV / GeoJSON)]
-H --> I[frontend: 입법 영향 지도]
+  subgraph collect["collect/ (Python, 로컬 + GitHub Actions 매일 1회)"]
+    A1[collect_bills.py<br/>collect_summaries.py] --> A2[filter_bills.py<br/>add_review_stage.py]
+    A2 --> A3[classify_new_bills.py<br/>새 법안 분야 분류]
+    A4[fetch_cheongju_buildings.py<br/>브이월드 건물] --> B
+    A3 --> B[build_web_data.py<br/>판정 규칙 26건 · 원문 대조 · 판정]
+    C1[extract_criteria.py<br/>규칙 기반 추출] --> C2[crosscheck_criteria.py<br/>세 출처 교차 확인]
+  end
+  API[열린국회정보 Open API] --> A1
+  VW[브이월드 WFS] --> A4
+  B --> D[(web/data<br/>bills.json · demo_rules.json<br/>buildings.geojson · crosscheck.json)]
+  C2 --> D
+  D --> W1[web/index.html<br/>지도]
+  D --> W2[web/admin.html<br/>행정 화면]
+  J[web/judge.js<br/>판정 규칙 공용] --> W1 & W2
+  J -. 같은 로직 .-> S2
+  subgraph server["server/ (Vercel ppaegok-api, OpenAI 키는 여기만)"]
+    S1[api/ask.js<br/>질의 도우미]
+    S2[api/agent.js<br/>검토 에이전트]
+  end
+  W2 -- 질문 --> S1
+  W2 -- 검토 초안 요청 --> S2
+  D -. 공개 데이터 읽기 .-> S1 & S2
 ```
 
 ```text
 law-impact-map/
-├─ collect/    # 수집·전처리 (Python)
-│  └─ fetch_cheongju_buildings.py   # 브이월드 건물통합정보 동 단위 수집
-├─ backend/    # 분야 분류, RAG 기준 추출, 판정 API
-├─ frontend/   # 지도 화면 (본 구현 예정)
-├─ web/        # 1차 시제품: 정적 3D 웹 지도 (브이월드 3D, 키 없으면 MapLibre GL JS · GitHub Pages 배포)
-├─ data/       # 샘플 데이터 (CSV, GeoJSON)
-└─ docs/       # 기획, 아키텍처, 데이터 점검, 트러블슈팅
+├─ collect/    # 수집·전처리·판정 데이터 생성 (Python)
+├─ server/     # Vercel 서버리스: api/ask.js(질의 도우미), api/agent.js(검토 에이전트)
+├─ web/        # GitHub Pages 정적 사이트: index.html(지도), admin.html(행정 화면), judge.js(판정)
+├─ data/       # 원천·중간 데이터 (CSV, GeoJSON)
+├─ notebooks/  # 분야 분류 모델 학습
+├─ docs/       # 데이터 점검, 코드표, 추출 방식 문서
+└─ .github/workflows/  # pages.yml(배포), daily-collect.yml(매일 새 법안 수집)
 ```
+
+예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 법안 검색은 벡터 검색(RAG)이 아니라 법안명·요약문 단어 일치로 고릅니다.
 
 <br />
 
@@ -106,7 +125,7 @@ law-impact-map/
 
 | 수집·전처리 | AI | 데이터 | 시각화 |
 | :---: | :---: | :---: | :---: |
-| <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=Python&logoColor=white" alt="Python" /> | <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=OpenAI&logoColor=white" alt="OpenAI" /><br /><img src="https://img.shields.io/badge/RAG-0D8794?style=flat-square" alt="RAG" /> | <img src="https://img.shields.io/badge/CSV-217346?style=flat-square" alt="CSV" /><br /><img src="https://img.shields.io/badge/GeoJSON-111827?style=flat-square" alt="GeoJSON" /> | <img src="https://img.shields.io/badge/Web_Map-2477FF?style=flat-square" alt="Web Map" /> |
+| <img src="https://img.shields.io/badge/Python-3776AB?style=flat-square&logo=Python&logoColor=white" alt="Python" /> | <img src="https://img.shields.io/badge/OpenAI-412991?style=flat-square&logo=OpenAI&logoColor=white" alt="OpenAI" /><br /><img src="https://img.shields.io/badge/Claude-D97757?style=flat-square&logo=Anthropic&logoColor=white" alt="Claude" /> | <img src="https://img.shields.io/badge/CSV-217346?style=flat-square" alt="CSV" /><br /><img src="https://img.shields.io/badge/GeoJSON-111827?style=flat-square" alt="GeoJSON" /> | <img src="https://img.shields.io/badge/Web_Map-2477FF?style=flat-square" alt="Web Map" /> |
 
 <br />
 
@@ -115,14 +134,13 @@ law-impact-map/
 ```bash
 git clone https://github.com/cbnu-lawmap/law-impact-map.git
 cd law-impact-map
-cp .env.example .env   # API 키 입력
+cp .env.example .env   # 로컬 수집용 키 입력 (커밋 금지)
 ```
 
 `.env`
 
 ```text
 ASSEMBLY_API_KEY=   # 열린국회정보
-OPENAI_API_KEY=
 VWORLD_KEY=         # 브이월드 (Referer 등록 도메인 필요)
 ```
 
@@ -147,7 +165,24 @@ python -m http.server 8000 --directory web
 
 로그인·서버 저장이 없는 시연용 공개 화면이며, 도입 시에는 행정망 내부에서만 씁니다. 진행 기록은 브라우저(localStorage)에만 남습니다.
 
-질의 도우미는 `server/api/ask.js`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 씁니다(GitHub Pages에는 OpenAI 키를 둘 수 없음). 키는 Vercel 환경변수 `OPENAI_API_KEY`에만 있습니다. 공개 법안 자료와 질문만 OpenAI로 보내며, 개인정보가 든 질문과 개별 건물 판정 질문은 서버에서 고정 문구로 거절합니다. 다시 배포: `cd server && npx vercel deploy --prod`
+AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 씁니다(GitHub Pages에는 OpenAI 키를 둘 수 없음). 키는 Vercel 환경변수 `OPENAI_API_KEY`에만 있습니다. 행정 화면 설정에서 「질의 도우미 사용」을 끄면 두 기능 모두 서버에 연결하지 않습니다. 다시 배포: `cd server && npx vercel deploy --prod`
+
+| 기능 | 파일 | 하는 일 |
+| :--- | :--- | :--- |
+| 질의 도우미 | `server/api/ask.js` | 질문과 관련된 법안을 단어 일치로 골라 그 내용만 근거로 답함. 답에 나온 숫자가 근거에 있는지 대조 |
+| 검토 에이전트 | `server/api/agent.js` | OpenAI 함수 호출로 모델이 도구(법안 조회, 기준 추출, 교차 확인, 건물 판정, 검토서 초안)를 골라 최대 8단계 실행. 근거 문구가 원문에 없으면 버림. 판정은 원문 대조를 통과한 기준이나 시범 규칙으로만 함. 한 번 실행 토큰 12,000 상한, 같은 법안 10분 캐시, IP당 1분 5회 |
+
+두 기능 모두 공개 법안 자료와 질문만 OpenAI로 보내며, 개인정보가 든 질문과 개별 건물 판정 질문은 서버에서 고정 문구로 거절합니다. 결과에는 항상 「사람 확인 필요」가 붙습니다.
+
+새 법안은 GitHub Actions(`daily-collect.yml`)가 매일 1회 수집해 `bills.json`을 갱신합니다. 열린국회 키는 GitHub Secret `ASSEMBLY_API_KEY`로만 쓰며, 없으면 수집을 건너뜁니다.
+
+### 시연 흐름
+
+1. **법안 선택**: 지도 화면 왼쪽 목록에서 법안을 고릅니다 (예: 건축물관리법 2206436, 200㎡ 미만·2층 이하 해체 간소화).
+2. **지도 색**: 사창동 건물이 대상(빨강)·경계선(노랑)·비대상·판정불가로 칠해지고, 건물을 누르면 판정 사유가 나옵니다.
+3. **행정 화면**: 「행정 화면」에서 상황판과 법안 검토 목록(심사 단계 순)을 보고, 법안 상세에서 집계·건물 명부·교차 확인 결과를 확인합니다.
+4. **에이전트 초안**: 「에이전트로 검토 초안 만들기」를 누르면 AI가 부른 도구와 이유가 단계별로 나오고 검토서 초안이 만들어집니다 (사람 확인 필요).
+5. **한글 검토서**: 「인쇄용 검토서」에서 A4 인쇄 또는 「한글(HWPX) 내려받기」로 결재 문서 초안을 받습니다.
 
 배포 사이트는 브이월드 WebGL 3D 지도를 씁니다. 브이월드 키는 저장소에 커밋하지 않고, 배포 도메인(`https://cbnu-lawmap.github.io`) 전용으로 발급한 키를 GitHub Secret `VWORLD_KEY`에 넣으면 배포할 때 `web/index.html`에 들어갑니다. 키가 없거나 브이월드 지도를 띄우지 못하면 기본 3D 지도(MapLibre, OSM 바탕)로 표시합니다. 로컬 실행은 키 없이 기본 3D 지도로 열립니다.
 
@@ -158,9 +193,9 @@ python -m http.server 8000 --directory web
 | 항목 | 원칙 |
 | :--- | :--- |
 | 개인정보 | 건물명(`bld_nm`)에 개인 이름이 섞여 있어 저장하지 않음. 소유자 등 개인 식별 정보 미수집 |
-| AI 신뢰성 | 추출 기준마다 법안 원문 근거 표시, 원문 수치와 불일치하면 채택하지 않음 |
+| AI 신뢰성 | 추출 기준마다 법안 원문 근거 표시, 근거 문구가 원문에 없거나 숫자가 맞지 않으면 채택하지 않음. AI 결과는 「사람 확인 전」으로 표시하고 세 출처 교차 확인 상태를 함께 보여 줌 |
 | 정치 중립 | 의원·정당 평가나 순위 표시 없음 |
-| 보안 | API 키는 `.env`에만 저장, 커밋 금지. OpenAI에는 공개 법안 텍스트만 전송 |
+| 보안 | API 키는 커밋하지 않음. OpenAI 키는 Vercel 환경변수, 브이월드·열린국회 키는 GitHub Secret에만 둠. OpenAI에는 공개 법안 텍스트와 질문만 전송 |
 | 고지 | 판정 결과는 건축물 데이터 기반 추정이며 법률 자문이 아님 |
 
 <br />
@@ -174,9 +209,12 @@ python -m http.server 8000 --directory web
 | 사창동 건물 수집·점검 | 완료 |
 | 열린국회정보 법안 수집 (22대 계류 678건) | 완료 |
 | 분야 분류 (9개 분야, Keras 신경망) | 완료 |
-| 기준 추출 (AI) | 예정 |
-| 건물 판정 (수작업 시범 2건) | 진행 중 |
-| 지도 화면 | 1차 공개 ([시제품](https://cbnu-lawmap.github.io/law-impact-map/)) |
+| 기준 추출 (AI 24건 + 사람 2건, 규칙 기반, 팀원 AI 76건) | 완료 (AI 결과는 사람 확인 전) |
+| 기준 교차 확인 | 완료 |
+| 건물 판정 (시범 26건) | 완료 |
+| 지도 화면 · 행정 화면 | 공개 ([시제품](https://cbnu-lawmap.github.io/law-impact-map/)) |
+| 질의 도우미 · 검토 에이전트 | 질의 도우미 운영 중, 에이전트는 배포 전 |
+| 매일 새 법안 수집 | 워크플로 준비 (열린국회 키 등록 필요) |
 | 보고서(한글)·발표자료(PPT) | 예정 |
 
 <br />
@@ -185,7 +223,7 @@ python -m http.server 8000 --directory web
 
 | [최현규](https://github.com/choihyungyu0) | 도관우 | 지서윤 |
 |:---:|:---:|:---:|
-| Team Leader<br />Frontend · Architecture · 건물 데이터 | Backend<br />법안 수집 · 전처리 | Backend · Docs<br />RAG · GitHub 규칙 · 기획 |
+| Team Leader<br />Frontend · Architecture · 건물 데이터 | Backend<br />법안 수집 · 전처리 | Backend · Docs<br />AI 기준 추출 · GitHub 규칙 · 기획 |
 
 <br />
 
