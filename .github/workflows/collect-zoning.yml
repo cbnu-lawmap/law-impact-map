@@ -1,0 +1,47 @@
+# 사창동 건물 용도지역 수집 (브이월드 2D 데이터 API)
+# 브이월드 키는 GitHub Secret VWORLD_KEY 로만 쓴다. 키가 없으면 조용히 건너뛴다.
+# 결과 data/zoning_사창동.csv 를 실행한 브랜치에 커밋한다.
+name: Collect zoning
+
+on:
+  push:
+    branches: [feat/zoning]
+    paths:
+      - collect/collect_zoning.py
+      - .github/workflows/collect-zoning.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r collect/requirements.txt
+      - name: Probe VWorld (no key)
+        run: |
+          # 키 없이 불러 브이월드가 러너 IP에서 응답하는지만 본다 (정상이면 200 + PARAM_REQUIRED)
+          curl -s -o probe.txt -w "HTTP %{http_code} " --max-time 20 "https://api.vworld.kr/req/data?service=data&request=GetFeature&data=LT_C_UQ111&format=json&geomFilter=POINT(127.46%2036.634)" || true
+          head -c 300 probe.txt || true; echo; rm -f probe.txt
+      - name: Collect
+        env:
+          VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
+        run: python -u collect/collect_zoning.py
+      - name: Commit
+        run: |
+          f="data/zoning_사창동.csv"
+          if [ ! -f "$f" ]; then echo "파일이 없음 (키 없음 또는 응답 이상)"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf input
+          git add "$f"
+          git diff --cached --quiet && { echo "바뀐 것 없음"; exit 0; }
+          git commit -m "data: 사창동 건물 용도지역 수집"
+          git push origin HEAD:${{ github.ref_name }}
