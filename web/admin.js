@@ -46,7 +46,8 @@
 
   var D = { fields: {}, bills: [], byNo: {}, demos: {}, region: "", total: 0, props: null, judged: {} };
   var ui = {
-    bills: { q: "", field: "", committee: "", status: "", pg: "", sort: "date", dir: -1, page: 0, sel: {} },
+    // 기본 정렬: 통과에 가까운 심사 단계 순 (같은 단계는 단계 날짜가 최근인 것부터)
+    bills: { q: "", field: "", committee: "", status: "", pg: "", stage: "", sort: "stage", dir: 1, page: 0, sel: {} },
     roster: { tab: "", page: 0, no: null },
   };
   var $view = document.getElementById("view");
@@ -107,6 +108,13 @@
   function fieldTag(b) {
     return '<span class="tag" title="법안 내용으로 자동 분류한 분야">' + esc(fieldName(b.field)) + ' <span class="sub">자동 분류</span></span>' +
       (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>' : "");
+  }
+  // 심사 단계 배지 (법사위 이후 진행 중이면 강조, 종결이면 흐리게)
+  function stageTag(b, withDate) {
+    if (!b.stage) return '<span class="tag wait">단계 정보 없음</span>';
+    var k = Judge.stageKind(b);
+    return '<span class="tag stage' + (k ? " " + k : "") + '" title="국회 심사 단계' + (b.stage_date ? " · " + esc(b.stage_date) : "") + '">' +
+      esc(b.stage) + (withDate && b.stage_date ? ' <span class="sub">' + esc(b.stage_date) + "</span>" : "") + "</span>";
   }
   function fieldText(b) { return fieldName(b.field) + " (자동 분류" + (lowConf(b) ? " · 분류 확인 필요" : "") + ")"; }
   function getJSON(url) {
@@ -287,6 +295,7 @@
       " 기준 · 국회 계류 법안이 우리 동네 건물에 미치는 영향</p>";
     html += headline(judgedNos, judgedDone);
     html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
+    html += nearPassCard();
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
@@ -333,6 +342,34 @@
     $view.querySelectorAll("a[data-field]").forEach(function (a) {
       a.addEventListener("click", function () { ui.bills.field = a.getAttribute("data-field"); ui.bills.page = 0; });
     });
+    var more = document.getElementById("near-more");
+    if (more) more.addEventListener("click", function () { ui.bills.stage = "near"; ui.bills.page = 0; });
+  }
+
+  // 상황판 카드: 곧 통과될 수 있는 법안 (법사위 회부 이후이고 아직 진행 중)
+  function nearPassCard() {
+    var near = D.bills.filter(Judge.isNearPass).sort(function (a, b) {
+      return Judge.stageRank(a.stage) - Judge.stageRank(b.stage) || (a.stage_date < b.stage_date ? 1 : a.stage_date > b.stage_date ? -1 : 0);
+    });
+    var stageCnt = {};
+    D.bills.forEach(function (b) { if (b.stage) stageCnt[b.stage] = (stageCnt[b.stage] || 0) + 1; });
+    var dist = Judge.STAGES.filter(function (st) { return stageCnt[st]; }).map(function (st) { return st + " " + fmt(stageCnt[st]) + "건"; }).join(" · ");
+    var html = '<div class="card near-pass" id="near-pass"><div class="near-head"><h3>곧 통과될 수 있는 법안</h3>' +
+      '<span class="near-count" id="near-count">' + fmt(near.length) + "건</span></div>" +
+      '<p class="muted small near-note">법제사법위원회(법사위)에 회부된 뒤 아직 진행 중인 법안입니다. 본회의 처리가 끝났거나 폐기된 법안은 뺍니다.</p>';
+    if (!near.length) {
+      html += '<p class="near-empty">지금은 없습니다. 법사위에 회부된 진행 중 법안이 0건입니다.</p>';
+    } else {
+      html += '<table class="dt"><tbody>' + near.slice(0, 5).map(function (b) {
+        var d = D.demos[b.no];
+        var hit = d ? '<span class="tag done">대상·경계선 ' + fmt(d.counts.대상 + d.counts.경계선) + "동</span>" : '<span class="tag wait">기준 추출 대기</span>';
+        return '<tr><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + '</a><div class="muted small">의안 ' + esc(b.no) + " · " + esc(b.committee) +
+          "</div></td><td>" + stageTag(b, true) + "</td><td>" + hit + "</td></tr>";
+      }).join("") + "</tbody></table>" +
+        (near.length > 5 ? '<p class="small near-more"><a href="#/bills" id="near-more">' + fmt(near.length) + "건 모두 보기</a></p>" : "");
+    }
+    html += '<p class="muted small near-dist">전체 심사 단계: ' + esc(dist || "정보 없음") + "</p></div>";
+    return html;
   }
 
   // 상황판 맨 위 한 문장: 판정한 법안 가운데 대상+경계선이 가장 많은 법안 (모두 0이면 그대로 말한다)
@@ -376,6 +413,9 @@
       if (s.status === "done" && !D.demos[b.no]) return false;
       if (s.status === "wait" && D.demos[b.no]) return false;
       if (s.pg && pgOf(b.no) !== s.pg) return false;
+      if (s.stage === "near" && !Judge.isNearPass(b)) return false;
+      if (s.stage === "open" && b.in_progress !== true) return false;
+      if (s.stage && s.stage !== "near" && s.stage !== "open" && b.stage !== s.stage) return false;
       if (q && b._q.indexOf(q) < 0) return false;
       return true;
     });
@@ -390,6 +430,13 @@
       return b[key] || "";
     };
     list.sort(function (a, b) {
+      if (key === "stage") {
+        // 단계 순서(머리글을 누르면 방향이 바뀜) → 같은 단계는 단계 날짜 최근 순
+        var r = (Judge.stageRank(a.stage) - Judge.stageRank(b.stage)) * dir;
+        if (r) return r;
+        var da = a.stage_date || "", db = b.stage_date || "";
+        return (da < db ? 1 : da > db ? -1 : 0) || (a.no < b.no ? 1 : -1);
+      }
       var x = val(a), y = val(b);
       return (x < y ? -1 : x > y ? 1 : 0) * dir || (a.no < b.no ? 1 : -1);
     });
@@ -400,7 +447,10 @@
     var s = ui.bills;
     var committees = Array.from(new Set(D.bills.map(function (b) { return b.committee; }))).sort();
     var html = '<h2>법안 검토 목록</h2><p class="lead">계류 법안 ' + fmt(D.bills.length) +
-      "건. 판정한 법안은 사창동 건물 동수가 함께 나옵니다. 체크한 법안은 진행 상태를 한꺼번에 바꿀 수 있습니다.</p>";
+      "건. 기본 순서는 통과에 가까운 심사 단계 순입니다. 판정한 법안은 사창동 건물 동수가 함께 나옵니다. 체크한 법안은 진행 상태를 한꺼번에 바꿀 수 있습니다.</p>";
+    var stageCnt = {};
+    D.bills.forEach(function (b) { if (b.stage) stageCnt[b.stage] = (stageCnt[b.stage] || 0) + 1; });
+    var nearN = D.bills.filter(Judge.isNearPass).length, openN = D.bills.filter(function (b) { return b.in_progress === true; }).length;
     html += '<div class="toolbar no-print">' +
       '<input type="search" id="f-q" placeholder="법안명·번호·제안이유 검색" value="' + esc(s.q) + '">' +
       '<select id="f-field"><option value="">분야 전체</option>' + Object.keys(D.fields).map(function (k) {
@@ -414,6 +464,12 @@
       '<select id="f-pg"><option value="">진행 전체</option>' + PG_KEYS.map(function (k) {
         return '<option value="' + k + '"' + (s.pg === k ? " selected" : "") + ">" + PG[k].label + "</option>";
       }).join("") + "</select>" +
+      '<select id="f-stage" aria-label="심사 단계"><option value="">심사 단계 전체</option>' +
+      '<option value="open"' + (s.stage === "open" ? " selected" : "") + ">진행 중인 법안만 (" + fmt(openN) + ")</option>" +
+      '<option value="near"' + (s.stage === "near" ? " selected" : "") + ">곧 통과될 수 있는 법안 (" + fmt(nearN) + ")</option>" +
+      Judge.STAGES.filter(function (st) { return stageCnt[st]; }).map(function (st) {
+        return '<option value="' + esc(st) + '"' + (s.stage === st ? " selected" : "") + ">" + esc(st) + " (" + fmt(stageCnt[st]) + ")</option>";
+      }).join("") + "</select>" +
       '<span class="spacer"></span><span class="muted small" id="f-count"></span>' +
       '<button type="button" class="btn ghost" id="f-csv">CSV 내려받기</button></div>' +
       '<div class="toolbar no-print bulk" id="bulk"></div>' +
@@ -425,15 +481,15 @@
       clearTimeout(debounce);
       debounce = setTimeout(function () { s.q = e.target.value; s.page = 0; drawBillTable(); }, 150);
     });
-    [["f-field", "field"], ["f-com", "committee"], ["f-status", "status"], ["f-pg", "pg"]].forEach(function (p) {
+    [["f-field", "field"], ["f-com", "committee"], ["f-status", "status"], ["f-pg", "pg"], ["f-stage", "stage"]].forEach(function (p) {
       document.getElementById(p[0]).addEventListener("change", function (e) { s[p[1]] = e.target.value; s.page = 0; drawBillTable(); });
     });
     document.getElementById("f-csv").addEventListener("click", function () {
       downloadCSV("빼곡_법안검토목록_" + stamp() + ".csv",
-        ["의안번호", "법안명", "소관위원회", "제안일", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
+        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
-          return [b.no, b.name, b.committee, b.date, fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
+          return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
             .concat([PG[pgOf(b.no)].label, b.link]);
         }));
@@ -472,7 +528,7 @@
     var allOn = rows.length && rows.every(function (b) { return s.sel[b.no]; });
     var html = '<table class="dt"><thead><tr><th class="chk no-print"><input type="checkbox" id="sel-all"' + (allOn ? " checked" : "") +
       ' aria-label="이 쪽 모두 선택"></th>' + th("no", "의안번호") + th("name", "법안명") + th("committee", "위원회") +
-      th("date", "제안일") + th("field", "분야") + th("impact", "사창동 영향") + th("pg", "진행") + "</tr></thead><tbody>";
+      th("date", "제안일") + th("stage", "심사 단계") + th("field", "분야") + th("impact", "사창동 영향") + th("pg", "진행") + "</tr></thead><tbody>";
     html += rows.map(function (b) {
       var d = D.demos[b.no];
       var impact = d
@@ -481,9 +537,9 @@
         : '<span class="tag wait">기준 추출 대기</span>';
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
-        '</td><td class="num">' + esc(b.date) + "</td><td>" + esc(fieldName(b.field)) +
+        '</td><td class="num">' + esc(b.date) + "</td><td>" + stageTag(b, true) + "</td><td>" + esc(fieldName(b.field)) +
         (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + "</td><td>" + pgMark(b.no) + "</td></tr>";
-    }).join("") || '<tr><td colspan="8" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
     html += "</tbody></table>" + pager(s.page, pages, list.length);
     var box = document.getElementById("bill-table");
     box.innerHTML = html;
@@ -528,7 +584,7 @@
   function billHead(b) {
     return '<div class="crumb no-print"><a href="#/bills">← 법안 검토 목록</a></div>' +
       "<h2>" + esc(b.name) + '</h2><p class="lead">의안번호 ' + esc(b.no) + " · " + esc(b.committee) + " · 제안 " + esc(b.date) +
-      " · " + fieldTag(b) + " · " + pgMark(b.no) +
+      " · " + stageTag(b, true) + " · " + fieldTag(b) + " · " + pgMark(b.no) +
       (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>";
   }
   function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }

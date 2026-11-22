@@ -168,6 +168,10 @@ h2 { margin: 0; font-size: var(--fs-xs); font-weight: 700; color: var(--muted); 
 .badge .sub { font-weight: 500; color: var(--muted); }
 .badge.uncertain { background: var(--warn-soft); color: var(--warn); border-color: var(--warn-line); }
 .badge.demo { background: var(--ink); color: #fff; border-color: var(--ink); }
+/* 심사 단계: 법사위 이후 진행 중은 강조, 종결(폐기 등)은 점선으로 흐리게 */
+.badge.stage { background: var(--card); }
+.badge.stage.near { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+.badge.stage.closed { border-style: dashed; color: var(--muted); font-weight: 500; }
 
 /* 법안 상세 */
 .detail {
