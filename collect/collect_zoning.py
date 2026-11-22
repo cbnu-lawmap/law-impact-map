@@ -9,7 +9,8 @@
   LT_C_UQ112 관리지역, LT_C_UQ113 농림지역, LT_C_UQ114 자연환경보전지역
   LT_C_UD801 개발제한구역, LT_C_UPISUQ161 지구단위계획구역 (있으면 '기타구역' 칸에 적음)
 
-키는 GitHub Secret VWORLD_KEY 로만 쓴다. 키가 없으면 아무것도 하지 않고 끝난다.
+키는 환경변수 VWORLD_KEY 로만 받는다 (GitHub Secret 또는 로컬 .env). 키가 없으면 아무것도 하지 않고 끝난다.
+브이월드는 해외·클라우드 IP(GitHub Actions)를 받지 않아, 실제 수집은 국내 PC에서 .env 키로 한 번 했다.
 브이월드는 키를 등록한 도메인을 domain 파라미터와 Referer 로 확인한다.
 주소와 예외 글에는 키가 들어 있으므로 찍지 않는다.
 
