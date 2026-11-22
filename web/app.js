@@ -288,6 +288,12 @@
       ["구조", Judge.isEmpty(p.strct_cd) ? val(null) : esc(Judge.structName(p.strct_cd))],
       ["PNU", val(p.pnu)],
     ];
+    // 지상층수가 빈 건물: 신경망 추정 구간 (notebooks/building_imputation.ipynb). 판정에는 쓰지 않음
+    if (Judge.isEmpty(p.grnd_flr) && !Judge.isEmpty(p.est_flr)) {
+      rows.splice(3, 0, ["추정 지상층수", esc(p.est_flr) +
+        ' <span class="muted">(신경망 추정' + (p.est_p ? " " + Math.round(p.est_p * 100) + "%" : "") +
+        ", 참고용 · 판정에 쓰지 않음)</span>"]);
+    }
     var html = '<div class="bcard"><h4>건물 속성</h4><table>' +
       rows.map(function (r) { return "<tr><th>" + r[0] + "</th><td>" + r[1] + "</td></tr>"; }).join("") +
       "</table>";
