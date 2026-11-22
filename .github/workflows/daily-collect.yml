@@ -1,0 +1,95 @@
+name: Daily bill collection
+
+# 매일 한 번 열린국회 API에서 법안을 받아 분야를 붙이고 web/data/bills.json 을 갱신한다.
+# 바뀐 것이 있으면 main 에 커밋하고 같은 실행 안에서 Pages 배포(pages.yml)를 부른다.
+# (GITHUB_TOKEN 으로 올린 커밋은 다른 워크플로를 깨우지 않으므로 push 트리거에 맡기지 않는다)
+
+on:
+  schedule:
+    - cron: "30 21 * * *"   # 매일 06:30 (한국 시간)
+  workflow_dispatch:
+
+concurrency:
+  group: daily-collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.commit.outputs.changed }}
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      # 키가 없으면 실패하지 않고 한 줄만 남기고 끝낸다. 키 값은 출력하지 않는다
+      - name: Check API key
+        id: key
+        env:
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+        run: |
+          if [ -n "$ASSEMBLY_API_KEY" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ASSEMBLY_API_KEY secret not set: skipping collection"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.key.outputs.ok == 'true'
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        if: steps.key.outputs.ok == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        if: steps.key.outputs.ok == 'true'
+        run: pip install -r collect/requirements.txt
+
+      - name: Collect and build
+        if: steps.key.outputs.ok == 'true'
+        env:
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+          PYTHONUTF8: "1"
+        run: |
+          python collect/collect_bills.py
+          test -f data/bills_raw.csv || { echo "bills_raw.csv was not created (API response problem)"; exit 1; }
+          python collect/filter_bills.py
+          python collect/collect_summaries.py
+          python collect/add_review_stage.py data/bills_raw.csv
+          python collect/classify_new_bills.py
+          python collect/build_web_data.py
+
+      - name: Commit if changed
+        id: commit
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          # 저장소는 LF 로 저장한다. csv 모듈이 쓰는 CRLF 줄끝을 커밋할 때 LF 로 바꿔 불필요한 전체 변경을 막는다
+          git config core.autocrlf input
+          git add data/bills_summary.csv data/bills_stage.csv data/bills_field_pred.csv data/bills_seen.csv web/data/bills.json
+          if git diff --cached --quiet; then
+            echo "No changes"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: 법안 자동 수집 $(TZ=Asia/Seoul date +%Y-%m-%d)"
+          git push origin HEAD:main
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: collect
+    if: needs.collect.outputs.changed == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.collect.outputs.sha }}
+    secrets: inherit

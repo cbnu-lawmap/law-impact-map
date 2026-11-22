@@ -395,6 +395,31 @@ def make_conclusion(d, counts, props):
     return s
 
 
+SEEN = os.path.join(DATA, "bills_seen.csv")   # 법안을 처음 본 날 (매일 수집 워크플로가 갱신)
+
+
+def mark_added(bills):
+    """처음 보는 법안에 오늘 날짜(한국 시간)를 added 로 붙이고 bills_seen.csv 에 남긴다.
+    bills_seen.csv 를 처음 만들 때 있던 법안은 날짜를 비워 '새로 들어온 법안'에 넣지 않는다."""
+    from datetime import datetime, timedelta, timezone
+    seen = {}
+    if os.path.exists(SEEN):
+        with open(SEEN, encoding="utf-8-sig", newline="") as f:
+            seen = {r["BILL_NO"]: r["FIRST_SEEN"] for r in csv.DictReader(f)}
+    first = not seen
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    for b in bills:
+        if b["no"] not in seen:
+            seen[b["no"]] = "" if first else today
+        if seen[b["no"]]:
+            b["added"] = seen[b["no"]]
+    with open(SEEN, "w", encoding="utf-8-sig", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["BILL_NO", "FIRST_SEEN"])
+        w.writerows(sorted(seen.items()))
+    print(f"  bills_seen.csv: 오늘 새로 들어온 법안 {sum(1 for b in bills if b.get('added') == today)}건")
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     print("web/data 생성")
@@ -447,6 +472,7 @@ def main():
                 "link": r["DETAIL_LINK"],
             })
     bills.sort(key=lambda b: (b["date"], b["no"]), reverse=True)
+    mark_added(bills)
     dump({"fields": FIELD_NAMES, "bills": bills}, "bills.json")
 
     # 4) 판정 시범

@@ -18,6 +18,9 @@ build/
 
 # 대용량 원본 데이터 (샘플만 커밋)
 data/raw/
+# 매일 수집 중간 파일 (원본 전체·후보 목록은 커밋하지 않음)
+data/bills_raw.csv
+data/bills_candidates_v2.csv
 *.shp
 *.dbf
 *.shx

@@ -9,14 +9,28 @@ DATA = ROOT / "data"
 
 load_dotenv()
 KEY = os.getenv("ASSEMBLY_API_KEY")
+if not KEY:
+    print("ASSEMBLY_API_KEY 없음: 제안이유 수집을 건너뜀")
+    raise SystemExit(0)
 URL = "https://open.assembly.go.kr/portal/openapi/BPMBILLSUMMARY"
 
 with open(DATA / "bills_candidates_v2.csv", encoding="utf-8-sig") as f:
     cands = list(csv.DictReader(f))
 
+# 이미 받아 둔 제안이유는 다시 받지 않는다. 후보에서 빠진 법안(본회의 처리 등)도 목록에 남긴다
+# (판정 시범 법안이 목록에서 사라지면 build_web_data.py 가 멈추기 때문)
+OLD = DATA / "bills_summary.csv"
+prev = {}
+if OLD.exists():
+    with open(OLD, encoding="utf-8-sig", newline="") as f:
+        prev = {r["BILL_NO"]: r for r in csv.DictReader(f)}
+
 out = []
 fail = []
 for i, r in enumerate(cands, 1):
+    if prev.get(r["BILL_NO"], {}).get("SUMMARY"):
+        out.append(prev[r["BILL_NO"]])
+        continue
     params = {"KEY": KEY, "TYPE": "json", "pIndex": 1, "pSize": 5, "BILL_NO": r["BILL_NO"]}
     summary = ""
     try:
@@ -36,6 +50,9 @@ for i, r in enumerate(cands, 1):
     if i % 50 == 0:
         print(f"{i} / {len(cands)}")
     time.sleep(0.2)
+
+kept = {o["BILL_NO"] for o in out}
+out += [r for no, r in prev.items() if no not in kept]
 
 with open(DATA / "bills_summary.csv", "w", newline="", encoding="utf-8-sig") as f:
     w = csv.DictWriter(f, fieldnames=list(out[0].keys()))
