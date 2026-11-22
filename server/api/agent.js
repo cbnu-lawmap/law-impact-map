@@ -357,13 +357,20 @@ async function run(D, no, note, llm) {
     return { error: "모르는 도구" };
   }
 
+  // 근거 문장에 없는 값을 버렸으면 단계 기록에 무엇을 뺐는지 남긴다
+  function notInQuote(dropped) {
+    const d = (dropped || []).filter((x) => String(x.why).indexOf(Criteria.NOT_IN_QUOTE) === 0);
+    return d.length ? " · " + Criteria.NOT_IN_QUOTE + ": " + d.map((x) => x.why.replace(Criteria.NOT_IN_QUOTE, "").replace(/^\s*\(|\)\s*$/g, "")).join(", ") : "";
+  }
+
   function summarize(name, r) {
     if (r.error) return "실행하지 않음: " + r.error;
     if (name === "get_bill") return `${r.name} · ${r.committee} · 제안 ${r.date} · 단계 ${r.stage || "정보 없음"}`;
     if (name === "extract_criteria") {
       const t = Criteria.ruleTexts(r.rule);
       return "원문 대조 통과 기준 " + Object.keys(t).length + "개" + (Object.keys(t).length ? " (" + Object.keys(t).map((k) => k + " " + t[k]).join(", ") + ")" : "") +
-        (r.dropped.length ? ", 근거가 맞지 않아 버린 기준 " + r.dropped.length + "개" : "") + (r.demo_rule ? ", 판정 시범 규칙 있음" : "");
+        (r.dropped.length ? ", 근거가 맞지 않아 버린 기준 " + r.dropped.length + "개" : "") +
+        notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "");
     }
     if (name === "crosscheck") return r.summary;
     if (name === "judge_buildings") {

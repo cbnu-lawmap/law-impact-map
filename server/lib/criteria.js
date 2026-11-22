@@ -6,9 +6,14 @@
  *   1. 근거 문구가 법안 요약 원문에 그대로 있어야 한다 (공백만 맞춘다)
  *   2. 연면적·층수 수치는 근거 문구에 나와야 한다 (1000 → 1000, 1,000, 1천 / 100000 → 10만)
  *   3. 사용승인은 기준일(REF_DATE) - N년 이고, 근거 문구에 "N년" 이 있어야 한다
+ *   4. 뽑은 값 자체가 근거 문장 안에 있어야 한다 ("근거 문장에 없는 값 제외")
+ *      - 용도: 그 코드의 시설 이름(별표1 호 이름, 하위 시설 예. 예: 물류터미널 → 창고시설)이 근거에 있어야 한다
+ *      - 연면적: 수치와 면적 단위(㎡·제곱미터), 층수: 수치와 "층", 위임: 위임한 기준 이름
  * 하나라도 어긋나면 그 기준은 버린다. 나중에 AI 가 뽑은 기준을 넣어도 같은 대조를 거친다.
  */
 const { USE_NAMES } = require("./judge");
+const USE_TERMS = require("./use-terms"); // data/building_use_codes.csv 에서 만든 시설 이름표
+const NOT_IN_QUOTE = "근거 문장에 없는 값 제외";
 
 const REF_DATE = "2026-11-01"; // collect/build_web_data.py 의 REF_DATE 와 같게
 const MAX_QUOTE = 160;
@@ -38,7 +43,7 @@ const USE_WORDS = [
   [/문화\s*및\s*집회시설|전시시설|공연장/, ["05000"]],
   [/종교시설/, ["06000"]],
   [/판매시설/, ["07000"]],
-  [/운수시설|여객터미널|물류터미널/, ["08000"]],
+  [/운수시설|여객터미널/, ["08000"]],
   [/의료시설/, ["09000"]],
   [/교육연구시설/, ["10000"]],
   [/노유자시설/, ["11000"]],
@@ -48,7 +53,7 @@ const USE_WORDS = [
   [/숙박시설/, ["15000"]],
   [/위락시설/, ["16000"]],
   [/공장/, ["17000"]],
-  [/창고/, ["18000"]],
+  [/창고|물류터미널|물류시설|집배송/, ["18000"]],
   [/위험물/, ["19000"]],
   [/자동차\s*관련\s*시설/, ["20000"]],
   [/장례시설/, ["28000"]],
@@ -67,6 +72,13 @@ function quoteAround(text, index, length) {
   }
   return text.slice(start, end).trim();
 }
+
+// 코드의 시설 이름 중 근거 문장(공백 무시)에 나온 것. 없으면 null
+function useTermIn(code, quote) {
+  const q = String(quote || "").replace(/\s+/g, "");
+  return (USE_TERMS[code] || []).find((t) => q.includes(t)) || null;
+}
+const AREA_UNIT = /제곱미터|㎡|평방미터|m2|m²/;
 
 function toBound(word) { return word === "이상" || word === "초과" ? "min" : "max"; }
 
@@ -123,7 +135,18 @@ function verify(candidates, summary) {
       const years = Number(REF_DATE.slice(0, 4)) - Number(String(c.value).slice(0, 4));
       if (String(c.value).slice(4) !== REF_DATE.slice(4) || !new RegExp("(?<!\\d)" + years + "\\s*년").test(quote)) why = "근거 문구에 '" + years + "년' 이 없음";
     } else if (c.attr === "용도" && !(Array.isArray(c.value) && c.value.every((v) => USE_NAMES[v]))) why = "모르는 용도 코드";
+    else if (c.attr === "연면적" && !AREA_UNIT.test(quote)) why = NOT_IN_QUOTE + " (면적 단위)";
+    else if (c.attr === "층수" && !new RegExp("(?<![\\d,])" + c.value + "\\s*층").test(quote)) why = NOT_IN_QUOTE + " (" + c.value + "층)";
+    else if (c.attr === "위임" && !quote.replace(/\s+/g, "").includes(c.value.replace(/\s+/g, ""))) why = NOT_IN_QUOTE + " (" + c.value + ")";
     if (why) { dropped.push({ attr: c.attr, value: c.value, why }); return; }
+    if (c.attr === "용도") {
+      // 코드마다 따로 본다: 근거에 시설 이름이 있는 코드만 남기고 나머지는 버린다
+      const kept = c.value.filter((v) => useTermIn(v, quote));
+      const gone = c.value.filter((v) => !useTermIn(v, quote));
+      if (gone.length) dropped.push({ attr: "용도", value: gone, why: NOT_IN_QUOTE + " (" + gone.map((v) => USE_NAMES[v] || v).join("·") + ")" });
+      if (!kept.length) return;
+      c.value = kept;
+    }
 
     if (c.attr === "용도") rule.용도 = Array.from(new Set((rule.용도 || []).concat(c.value)));
     else if (c.attr === "위임") rule.위임 = Array.from(new Set((rule.위임 || []).concat(c.value)));
@@ -157,4 +180,4 @@ function ruleTexts(rule) {
   return out;
 }
 
-module.exports = { REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };
+module.exports = { NOT_IN_QUOTE, useTermIn, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };

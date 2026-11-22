@@ -11,7 +11,9 @@
 
 판정(STATUS), 법안 × 기준 종류마다
   교차 확인됨  2개 이상 출처에 같은 기준·같은 수치가 있음 (미만/이하처럼 경계 표현만 다르면 NOTE 에 "경계 표현 다름")
-  확인 필요    기준이 있는 출처끼리 수치가 다름
+  확인 필요    기준이 있는 출처끼리 수치가 다름. 용도는 출처끼리 같아도 법안 글의 시설 이름을
+               별표1 분류(data/building_use_codes.csv)로 옮긴 것과 하나도 겹치지 않으면 확인 필요
+               (예: 물류터미널을 두 출처가 모두 운수시설로 뽑아도 18호 창고시설이므로 확인 필요)
   단일 출처    한 출처에만 있음
 교차 확인됨은 사람이 확인했다는 뜻이 아니다. 출처 셋 다 자동 추출이다.
 
@@ -58,16 +60,51 @@ ST_OK, ST_CHECK, ST_ONE = "교차 확인됨", "확인 필요", "단일 출처"
 OP_WORD = {">=": "이상", "<=": "이하", ">": "초과", "<": "미만", "=": ""}
 WORD_OP = {"이상": ">=", "이하": "<=", "초과": ">", "미만": "<", "이내": "<=", "넘는": ">"}
 USE_NAMES = {}
+# 법령 분류 대조용: 시설 이름(별표1 호 이름 + 하위 시설 예) → 주용도 코드. 예) 물류터미널 → 18000
+LEGAL_TERMS = {}
 with open(os.path.join(DATA, "building_use_codes.csv"), encoding="utf-8-sig") as _f:
     for _r in csv.DictReader(_f):
         USE_NAMES[_r["code"]] = _r["name"]
+        _terms = [_r["name"], _r["law_name"]] + re.split(r"[,，]", _r["examples"])
+        for _t in _terms:
+            _t = re.sub(r"\(.*?\)|등$|\s+", "", _t.strip())
+            if len(_t) >= 2:
+                LEGAL_TERMS.setdefault(_t, set()).add(_r["code"])
+# 코드표 예시에 없지만 법안에 자주 나오는 이름 (별표1 호 내용 기준으로 사람이 보탬)
+LEGAL_ALIASES = {
+    "주택": {"01000", "02000"},           # 1호 단독주택·2호 공동주택을 함께 부르는 말
+    "여객터미널": {"08000"},               # 8호 운수시설 (여객자동차터미널·공항·항만의 여객시설)
+    "물류시설": {"18000"},                 # 18호 다목 물류터미널, 라목 집배송 시설
+    "근린생활시설": {"03000", "04000"},     # 3호·4호를 함께 부르는 말
+    "전시시설": {"05000"},                 # 5호 라목 전시장
+    "위험물": {"19000"},                   # 19호 위험물 저장 및 처리 시설
+}  # server/scripts/sync-use-terms.js 의 ALIASES 와 같게 둘 것
+for _t, _cs in LEGAL_ALIASES.items():
+    LEGAL_TERMS.setdefault(_t, set()).update(_cs)
+SUMMARY = {}
+with open(os.path.join(DATA, "bills_summary.csv"), encoding="utf-8-sig") as _f:
+    for _r in csv.DictReader(_f):
+        SUMMARY[_r["BILL_NO"]] = _r["SUMMARY"]
+
+
+def legal_codes(text):
+    """법안 글에 나온 시설 이름을 별표1 분류(주용도 코드)로 옮긴다. {코드: [찾은 이름]}"""
+    t = re.sub(r"\s+", "", text or "")
+    found = {}
+    # 긴 이름부터 찾고 지워서 "물류터미널" 안의 다른 이름이 또 걸리지 않게 한다
+    for term in sorted(LEGAL_TERMS, key=len, reverse=True):
+        if term in t:
+            for c in LEGAL_TERMS[term]:
+                found.setdefault(c, []).append(term)
+            t = t.replace(term, " ")
+    return found
 
 # 팀원 AI 의 용도 글 → 주용도 코드. 위에서부터 찾고, 찾은 글자는 지운 뒤 다음을 찾는다
 USE_WORDS = [
     (r"공동주택|아파트|주택단지", ["02000"]),
     (r"단독주택", ["01000"]),
     (r"임대주택|공공주택|(?<![가-힣])주택|주거용 건축물|[가-힣]*주택", ["01000", "02000"]),
-    (r"물류터미널", ["08000"]),
+    (r"물류터미널|물류시설|집배송", ["18000"]),
     (r"공장", ["17000"]),
     (r"창고", ["18000"]),
     (r"생활숙박|숙박시설", ["15000"]),
@@ -293,6 +330,17 @@ def load_team(path):
 
 
 # ---------------------------------------------------------------- 비교
+def legal_check(no, coded, comparable):
+    """출처가 뽑은 용도가 법안 글의 시설 이름(별표1 분류)과 하나도 겹치지 않으면 그 출처 이름과 설명을 돌려준다"""
+    text = SUMMARY.get(no, "")
+    law = legal_codes(text)
+    if not law:
+        return [], ""
+    bad = [s for s in comparable if not (coded[s] & set(law))]
+    hint = ", ".join(f"{law[c][0]} → {USE_NAMES.get(c, c)}" for c in sorted(law))
+    return bad, hint
+
+
 def compare(no, attr, by_src, team_excluded):
     """by_src: {src: [items]} (그 기준 종류만). (status, note, matched_srcs) 를 돌려준다"""
     have = [s for s, _ in SOURCES if by_src.get(s)]
@@ -303,6 +351,11 @@ def compare(no, attr, by_src, team_excluded):
         for s in have:
             if not coded[s] and len(have) >= 2:
                 notes.append(f"{dict(SOURCES)[s]} 용도는 글로만 있어 코드로 비교하지 못함")
+        # 같은 답이 여러 출처에서 나와도 법령 분류와 다르면 걸러낸다
+        bad, hint = legal_check(no, coded, comparable)
+        if bad:
+            names = "·".join(dict(SOURCES)[s] for s in bad)
+            return ST_CHECK, notes + [f"법령 분류와 다름({names}). 법안 글: {hint}"], comparable
         if len(comparable) >= 2:
             common = set.intersection(*[coded[s] for s in comparable])
             if common:
