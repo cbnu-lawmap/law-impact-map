@@ -32,7 +32,9 @@
 | 기능 | 설명 |
 | :---: | --- |
 | 법안 수집 | 열린국회정보 Open API로 건축·주거·안전 분야 계류 법안 수집 |
-| 분야 분류 | 법안 텍스트를 분야(소방, 구조·노후, 주거 등)로 자동 분류 |
+| 분야 분류 | 법안 제안이유를 9개 분야로 분류하는 신경망 (직접 학습) |
+| 통과 예측 | 21대 국회 처리 결과로 학습한 신경망이 계류 법안의 반영 가능성 추정 |
+| 건물 층수 추정 | 건축물대장이 없는 건물의 지상층수를 모양·이웃으로 추정하는 신경망 (참고용) |
 | 기준 추출 | 법안 요약문에서 `{용도, 면적, 층수, 연도}` 규칙 추출. 판정 시범 26건 중 24건은 Claude로 추출한 뒤 근거 문구가 원문에 그대로 있는지, 숫자가 근거에 있는지 자동 대조 (담당자 확인 전) |
 | 교차 확인 | 같은 법안을 세 방식(우리 AI 추출, 규칙 기반 추출, 팀원 AI 추출)으로 뽑아 같은 숫자면 「교차 확인됨」, 다르면 「확인 필요」 |
 | 건물 판정 | 규칙 × 건물 속성 → **대상 / 경계선 / 비대상 / 판정불가** |
@@ -118,6 +120,25 @@ law-impact-map/
 ```
 
 예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 법안 검색은 벡터 검색(RAG)이 아니라 법안명·요약문 단어 일치로 고릅니다.
+
+<br />
+
+## 🧠 AI·학습 모델
+
+팀이 직접 학습한 모델 세 개가 중심입니다. 모두 Keras `Sequential` + `Dense` 구조이고, 노트북은 Colab에서 처음부터 끝까지 그대로 실행됩니다(데이터는 GitHub raw에서 읽음). 저장소에 올린 노트북에는 실행 결과(그래프·숫자)가 남아 있습니다.
+
+| 노트북 | 문제 | 데이터 | 기준선 | 신경망 | 화면에 쓰이는 곳 | Colab |
+| :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| [분야 분류](notebooks/field_classifier.ipynb) | 법안 제안이유 → 9개 분야 | 사람이 붙인 라벨 298건 | 규칙(법률명) 0.757, 로지스틱 회귀 0.808 (10회 평균 정확도) | Dense 128 → Softmax 9, **0.788 ± 0.043** | 지도·행정 화면 분야 필터, 확신도 0.6 미만 "분류 확인 필요", 에이전트 `classify_field` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_classifier.ipynb) |
+| [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 | 다수 클래스 정확도 0.642, 법률별 반영 비율 AUC 0.591, 로지스틱 회귀 AUC 0.749 | Dense 16 → Sigmoid, **AUC 0.737**, F1 0.615 (시간 분리 AUC 0.624) | 행정 화면 법안 상세·목록 "통과 가능성(신경망 추정)", 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
+| [건물 층수 추정](notebooks/building_imputation.ipynb) | 건축물대장이 없는 건물의 지상층수(5구간) | 사창동 층수가 있는 건물 2,108동 | 최빈값 0.403, 이웃 8동 다수결 0.488, 로지스틱 회귀 0.540 | Dense 64-32 → Softmax 5, **0.547** (한 구간 차이까지 0.889) | 지도 건물 카드 "추정 지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
+
+- 노트북마다 같은 순서입니다: 문제 → 데이터 → 전처리 → 학습/테스트 분리 → 기준선 → 신경망 → 과적합 확인 → 은닉층 실험 → 오답 분석 → 결과표 → 화면에 쓰이는 곳.
+- 세 모델 모두 같은 특징의 로지스틱 회귀와 차이가 흔들림 범위 안입니다. 데이터가 적어 은닉층이 주는 이득이 작다는 것도 결과로 적었습니다.
+- 숫자는 시드를 고정해도 실행하는 CPU 종류에 따라 셋째 자리가 조금 달라질 수 있습니다. 노트북의 결과표는 실행한 숫자로 코드가 만듭니다.
+- 학습한 가중치는 `web/data/models/`로 내보내고, 서버(`server/lib/nn.js`)가 TensorFlow 없이 같은 계산을 합니다. `node server/test/nn.js`가 Keras 예측과 서버 계산이 같은지 확인합니다.
+- 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다.
+- 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다.
 
 <br />
 
@@ -209,6 +230,7 @@ AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 
 | 사창동 건물 수집·점검 | 완료 |
 | 열린국회정보 법안 수집 (22대 계류 678건) | 완료 |
 | 분야 분류 (9개 분야, Keras 신경망) | 완료 |
+| 통과 예측·건물 층수 추정 (Keras 신경망) | 완료 |
 | 기준 추출 (AI 24건 + 사람 2건, 규칙 기반, 팀원 AI 76건) | 완료 (AI 결과는 사람 확인 전) |
 | 기준 교차 확인 | 완료 |
 | 건물 판정 (시범 26건) | 완료 |
