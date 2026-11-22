@@ -32,6 +32,8 @@ ASSEMBLY_API_KEY=발급받은키
 ## 매일 자동 수집 (`.github/workflows/daily-collect.yml`)
 
 매일 06:30(한국 시간)에 GitHub Actions가 아래를 차례로 돌립니다. 바뀐 것이 있으면 main에 커밋하고 바로 Pages에 배포합니다.
+
+열린국회 API 연결이 가끔 시간 초과로 끊기므로, 모든 호출은 `http_retry.py`의 `get_json`으로 4번까지(5·15·30초 쉬고) 다시 시도합니다. 기록에는 예외 종류만 남기고 인증키가 든 주소는 찍지 않습니다. 시험: `python collect/test_http_retry.py`
 저장소 비밀값 `ASSEMBLY_API_KEY`가 없으면 아무것도 하지 않고 성공으로 끝납니다.
 
 1. `collect_bills.py` → `filter_bills.py` → `collect_summaries.py` → `add_review_stage.py data/bills_raw.csv`

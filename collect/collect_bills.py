@@ -1,10 +1,12 @@
-import os, csv, time, requests
+import os, csv, sys, time
 from dotenv import load_dotenv
 
 from pathlib import Path
 
 # 어느 폴더에서 실행해도 저장소의 data/ 폴더를 쓰도록 이 파일 위치를 기준으로 경로를 정한다
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from http_retry import get_json  # noqa: E402  (시간 초과 재시도)
 DATA = ROOT / "data"
 
 load_dotenv()
@@ -23,8 +25,7 @@ page = 1
 
 while True:
     params = {"KEY": KEY, "TYPE": "json", "pIndex": page, "pSize": PSIZE, "AGE": 22}
-    res = requests.get(URL, params=params, timeout=30)
-    body = res.json()
+    body = get_json(URL, params, label=f"법안 목록 {page}페이지")
     if SERVICE not in body:
         print("응답 이상:", body)
         break
