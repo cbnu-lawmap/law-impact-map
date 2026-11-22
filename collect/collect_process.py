@@ -25,6 +25,7 @@ import csv
 import os
 import sys
 import time
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -90,26 +91,29 @@ def split_list(s):
 LOOK = ("국토교통위원회", "행정안전위원회", "환경노동위원회")
 
 
-def member_committees(people, era, reverse):
+def member_committees(people, era, reverse, verbose=False):
     """의원 코드 -> 그 대수에 소속했던 위원회 집합 (이름은 쓰지 않음).
     ALLNAMEMBER 는 대수 목록(GTELT_ERACO, 쉼표)과 소속 위원회 묶음(BLNG_CMIT_NM, '/')을 따로 준다.
     묶음 순서가 대수 순서와 같은지 반대인지 설명서가 없어, 지금 위원회 명단과 맞춰 보고 고른다(reverse)."""
-    out, mismatch = {}, 0
+    out, mismatch, shapes = {}, 0, Counter()
     for r in people:
         eras = [e.strip() for e in (r.get("GTELT_ERACO") or "").split(",") if e.strip()]
         if era not in eras:
             continue
-        segs = (r.get("BLNG_CMIT_NM") or "").split("/")
+        segs = [s for s in (r.get("BLNG_CMIT_NM") or "").split("/") if s.strip()]
+        shapes[(len(eras), len(segs))] += 1
         if reverse:
             segs = segs[::-1]
         if len(segs) == len(eras):
             seg = segs[eras.index(era)]
-        elif len(segs) == 1:
+        elif len(segs) == 1 and era == eras[-1]:   # 묶음이 하나뿐이면 가장 최근 대수의 것으로만 본다
             seg = segs[0]
-        else:              # 대수와 묶음 수가 안 맞으면 판정하지 않는다
+        else:              # 어느 대수의 묶음인지 알 수 없으면 판정하지 않는다
             mismatch += 1
             continue
         out[r.get("NAAS_CD")] = {cmt(c) for c in seg.split(",") if c.strip()}
+    if verbose:
+        print(f"  {era} 의원의 (대수 수, 묶음 수) 분포:", dict(sorted(shapes.items())))
     return out, mismatch
 
 
@@ -149,11 +153,11 @@ def main():
         except ApiError as e:
             print("  ALLBILLV2 실패, 건너뜀:", e)
             allb = {}
-        mem, mismatch = member_committees(people, era, reverse)
+        mem, mismatch = member_committees(people, era, reverse, verbose=True)
         if age == 22:      # 지금 위원회 명단으로 보충
             for c, k in roster:
                 mem.setdefault(c, set()).add(k)
-        print(f"  {era} 의원 {len(mem)}명의 소속 위원회 확보 (대수·묶음 수 불일치로 뺀 의원 {mismatch}명), 위원 수: "
+        print(f"  {era} 의원 {len(mem)}명의 소속 위원회 확보 (어느 대수 묶음인지 몰라 뺀 의원 {mismatch}명), 위원 수: "
               + ", ".join(f"{k} {sum(k in s for s in mem.values())}명" for k in LOOK))
 
         out, agree, disagree, filled, coded, matched = [], 0, 0, 0, 0, 0
