@@ -12,6 +12,8 @@
  *   판정불가 판정에 필요한 속성이 비어 있음 / 시행령 위임
  *
  * collect/build_web_data.py 의 judge() 와 같은 규칙이다. 한쪽을 고치면 다른 쪽도 고칠 것.
+ * 서버(검토 에이전트)는 이 파일의 복사본 server/lib/judge.js 를 쓴다. 이 파일을 고친 뒤
+ * node server/scripts/sync-judge.js 로 복사본을 다시 만들 것 (--check 는 다르면 실패).
  */
 (function (global) {
   "use strict";
