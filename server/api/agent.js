@@ -76,7 +76,7 @@ const reasonParam = { type: "string", description: "이 도구를 지금 부르�
 const noParam = { type: "string", description: "의안번호 7자리" };
 const TOOLS = [
   { name: "get_bill", description: "법안 요약, 소관 위원회, 제안일, 진행 단계를 읽는다.", props: { no: noParam } },
-  { name: "extract_criteria", description: "법안 요약에서 건축물 적용 기준(용도, 연면적, 층수, 사용승인, 시행령 위임)을 뽑고 원문 대조를 통과한 것만 돌려준다. 이미 판정한 시범 규칙(demo_rule)이 있으면 함께 돌려준다.", props: { no: noParam } },
+  { name: "extract_criteria", description: "법안 요약에서 건축물 적용 기준(용도, 연면적, 층수, 사용승인, 시행령 위임)을 뽑고 원문 대조를 통과한 것만 돌려준다. 이미 판정한 시범 규칙(demo_rule)이 있으면 함께 돌려준다. use_rule 은 판정에 쓸 규칙이고, null 이면 판정 보류(hold 에 이유)다.", props: { no: noParam } },
   { name: "crosscheck", description: "같은 법안의 기준을 세 출처(우리 AI, 규칙 기반, 팀원 AI)와 비교한 자료를 보고, 뽑은 기준과 같은지 본다.", props: { no: noParam } },
   {
     name: "judge_buildings",
@@ -109,7 +109,7 @@ const SYSTEM = [
   "너는 「빼곡」의 신규 법안 검토 도우미다. 지자체 담당 공무원이 법안 하나의 검토 초안을 만든다.",
   "도구를 하나씩 골라 부른다. 보통 순서는 get_bill, extract_criteria, crosscheck, judge_buildings, draft_review 이다.",
   "도구를 부를 때마다 reason 에 왜 부르는지 한국어 한 문장으로 쓴다.",
-  "judge_buildings 의 rule 은 extract_criteria 결과의 rule 을 그대로 쓰고, 그것이 비어 있으면 demo_rule.rule 을 쓴다. 둘 다 없으면 judge_buildings 를 부르지 않는다.",
+  "judge_buildings 의 rule 은 extract_criteria 결과의 use_rule 을 그대로 넘긴다. use_rule 이 null 이면(판정 보류) judge_buildings 를 부르지 말고 draft_review 로 넘어간다.",
   "숫자와 용도 코드를 지어내지 않는다. draft_review 를 부른 뒤에는 도구를 더 부르지 말고 '끝' 이라고만 답한다.",
 ].join("\n");
 
@@ -145,7 +145,8 @@ function openaiLLM(key, model) {
 
 // 가짜 모델: 정해진 순서로 도구를 부른다. AGENT_MOCK_SCRIPT=loop 이면 끝없이 부르고(단계 제한 시험),
 // AGENT_MOCK_SCRIPT=tokens 이면 호출마다 토큰을 많이 쓴 것처럼 센다(토큰 제한 시험),
-// AGENT_MOCK_SCRIPT=invent 이면 근거 없는 규칙으로 판정을 시도한다(규칙 거절 시험).
+// AGENT_MOCK_SCRIPT=invent 이면 근거 없는 규칙으로 판정을 시도한다(규칙 거절 시험),
+// AGENT_MOCK_SCRIPT=nosplit 이면 위임만 든 규칙으로 판정을 시도한다(판정할 기준 없음 시험).
 function mockLLM() {
   const script = process.env.AGENT_MOCK_SCRIPT || "normal";
   const tokens = script === "tokens" ? 5000 : 400;
@@ -177,13 +178,17 @@ function mockLLM() {
         }
       });
       for (const name of ORDER) {
-        if (done.includes(name)) continue;
+        // nosplit: 첫 판정이 "판정할 기준이 없음"으로 거절되면 도구가 알려 준 대로 한 번 더 시도한다
+        const retryJudge = script === "nosplit" && name === "judge_buildings" && done.filter((d) => d === name).length === 1 &&
+          out.judge_buildings && out.judge_buildings.error;
+        if (done.includes(name) && !retryJudge) continue;
         if (name === "judge_buildings") {
           const ex = out.extract_criteria || {};
-          const rule = ex.rule && Object.keys(ex.rule).length ? ex.rule : ex.demo_rule && ex.demo_rule.rule;
+          if (script === "nosplit" && !done.includes("judge_buildings")) return { message: callTool(name, { reason: "위임 기준만으로 집계해 봅니다.", rule: { 위임: ["용도"] } }), tokens };
+          const rule = ex.use_rule;
           if (!rule) continue;
           if (script === "invent") return { message: callTool(name, { reason: "기준을 조금 넓혀 봅니다.", rule: { 연면적: { max: 777 } } }), tokens };
-          const why = ex.rule && Object.keys(ex.rule).length ? WHY[name] : "요약에서 근거 있는 기준을 찾지 못해 판정 시범 규칙으로 집계합니다.";
+          const why = ex.use_rule_source === "원문 대조 통과 기준" ? WHY[name] : "요약에서 판정에 쓸 기준을 찾지 못해 판정 시범 규칙으로 집계합니다.";
           return { message: callTool(name, { reason: why, rule }), tokens };
         }
         return { message: callTool(name, { reason: WHY[name], no }), tokens };
@@ -197,10 +202,29 @@ function mockLLM() {
 // ---------------------------------------------------------------- 한 번 실행
 function fmt(n) { return Number(n).toLocaleString("ko-KR"); }
 
+// 건물을 실제로 가를 수 있는 기준(용도·연면적·층수·사용승인)이 하나라도 있는지. 위임만 있거나 비어 있으면 false
+const SPLIT_KEYS = ["용도", "연면적", "층수", "사용승인"];
+function judgeable(rule) {
+  if (!rule || typeof rule !== "object") return false;
+  return SPLIT_KEYS.some((k) => {
+    const v = rule[k];
+    if (v === undefined || v === null) return false;
+    if (Array.isArray(v)) return v.length > 0;
+    if (typeof v === "object") return Object.keys(v).some((b) => v[b] !== undefined && v[b] !== null && v[b] !== "");
+    return String(v) !== "";
+  });
+}
+const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·사용승인 기준 없이 위임만 있거나 비어 있음)";
+const HOLD_DELEG = "판정 보류: 시행령(대통령령 등)에 위임돼 기준 확정 전";
+const HOLD_NONE = "판정 보류: 요약 원문에서 근거 있는 판정 기준을 찾지 못함";
+const DEMO_FALLBACK_DELEG = "추출 기준이 위임뿐이라 시범 규칙 사용";
+const DEMO_FALLBACK_NONE = "근거 있는 추출 기준이 없어 시범 규칙 사용";
+const TODO_DECREE = "시행령 입법예고 확인";
+
 async function run(D, no, note, llm) {
   const bill = D.byNo[no];
   const demo = D.demos[no] || null;
-  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, draft: "", draftCtx: "", unverified: [] };
+  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, draft: "", draftCtx: "", unverified: [] };
   const overBudget = () => state.tokens >= TOKEN_CAP;
 
   // 판정에 넘긴 규칙은 원문 대조를 통과한 규칙이나 판정 시범 규칙과 똑같아야 한다.
@@ -220,12 +244,23 @@ async function run(D, no, note, llm) {
     });
     return JSON.stringify(out);
   }
+  // 추출 결과로 판정 방법을 정한다: 추출 규칙 / 시범 규칙 대체 / 판정 보류
+  function planFor(extracted) {
+    const r = extracted ? extracted.rule : {};
+    if (judgeable(r)) return { use_rule: r, source: "원문 대조 통과 기준", note: "" };
+    const onlyDeleg = !!(r && r.위임 && r.위임.length);
+    if (demo) return { use_rule: demo.rule, source: "판정 시범 규칙", note: onlyDeleg ? DEMO_FALLBACK_DELEG : DEMO_FALLBACK_NONE };
+    const hold = onlyDeleg ? HOLD_DELEG : HOLD_NONE;
+    return { use_rule: null, source: null, hold, note: hold };
+  }
+
   function checkRule(rule) {
-    if (!rule || typeof rule !== "object" || !Object.keys(rule).length) return { error: "규칙이 비어 있습니다" };
+    if (!rule || typeof rule !== "object" || !Object.keys(rule).length) return { error: "규칙이 비어 있습니다", no_split: true };
+    if (!judgeable(rule)) return { error: NO_SPLIT, no_split: true };
     const bad = Object.keys(rule).filter((k) => !KEYS.includes(k));
     if (bad.length) return { error: "모르는 기준: " + bad.join(", ") };
     const pools = [];
-    if (state.extracted && Object.keys(state.extracted.rule).length) pools.push(["원문 대조 통과 기준", state.extracted.rule]);
+    if (state.extracted && judgeable(state.extracted.rule)) pools.push(["원문 대조 통과 기준", state.extracted.rule]);
     if (demo) pools.push(["판정 시범 규칙", demo.rule]);
     if (!pools.length) return { error: "원문 대조를 통과한 기준이 없어 판정하지 않습니다" };
     const hit = pools.find((p) => canon(p[1]) === canon(rule));
@@ -249,6 +284,9 @@ async function run(D, no, note, llm) {
       const c = state.judged.counts;
       lines.push(`판정(${D.region} 건물 ${fmt(D.total)}동, ${state.judged.source} ${Object.entries(Criteria.ruleTexts(state.judged.rule)).map((x) => x.join(" ")).join(", ")}): 대상 ${fmt(c["대상"])}동, 경계선 ${fmt(c["경계선"])}동, 비대상 ${fmt(c["비대상"])}동, 판정불가 ${fmt(c["판정불가"])}동`);
       lines.push("주요 사유: " + state.judged.top.map((r) => r.status + " " + r.reason + " " + r.n + "동").join(", "));
+    } else if (state.plan && state.plan.hold) {
+      lines.push(state.plan.hold);
+      lines.push("담당자 할 일: " + TODO_DECREE + " (위임된 기준이 정해지면 다시 판정)");
     } else lines.push("판정: 근거 있는 기준이 없어 건물 판정을 하지 않음");
     if (note) lines.push("담당자 검토 관점: " + note);
     const ctx = lines.join("\n");
@@ -259,7 +297,9 @@ async function run(D, no, note, llm) {
     const fallback = [
       `의안번호 ${b.no} 「${b.name}」은 ${b.committee} 소관으로 ${b.date}에 제안되었습니다.`,
       state.extracted && !Object.keys(state.extracted.rule).length ? "공개된 요약 원문에서는 근거 문구가 맞는 건물 기준을 찾지 못했습니다." : "",
-      Object.keys(crit).length ? "검토에 쓴 적용 기준은 " + state.judged.source + "인 " + Object.keys(crit).map((k) => k + " " + crit[k]).join(", ") + "입니다." : "판정에 쓸 수 있는 근거 있는 기준이 없어 건물 판정은 하지 않았습니다.",
+      Object.keys(crit).length ? "검토에 쓴 적용 기준은 " + state.judged.source + "인 " + Object.keys(crit).map((k) => k + " " + crit[k]).join(", ") + "입니다." :
+        state.plan && state.plan.hold ? state.plan.hold + "이라 건물 판정은 하지 않았습니다. 담당자 할 일: " + TODO_DECREE + "." :
+        "판정에 쓸 수 있는 근거 있는 기준이 없어 건물 판정은 하지 않았습니다.",
       c ? `이 기준을 ${D.region} 건축물 ${fmt(D.total)}동에 적용하면 대상 ${fmt(c["대상"])}동, 경계선 ${fmt(c["경계선"])}동, 비대상 ${fmt(c["비대상"])}동, 판정불가 ${fmt(c["판정불가"])}동으로 추정됩니다.` : "",
       state.cross ? "출처별 기준 비교 결과는 " + state.cross.summary + "입니다." : "",
       "이 결과는 건축물 데이터로 추정한 것이며 법률 판단이 아니므로, 담당자가 원문과 시행령을 확인한 뒤 확정해야 합니다.",
@@ -269,12 +309,14 @@ async function run(D, no, note, llm) {
     if (!overBudget()) {
       const r = await llm.complete(
         "너는 지자체 법안 검토 담당자의 초안 작성을 돕는다. [자료]에 있는 내용과 숫자만 써서 한국어 검토 초안 한 문단(5문장 이내, 쉬운 존댓말)을 쓴다. " +
-        "계산하거나 지어낸 숫자를 쓰지 않는다. 판정은 건축물 데이터 기반 추정이며 법률 판단이 아니고 담당자 확인이 필요하다는 점을 끝에 적는다. 줄표(—)를 쓰지 않는다.",
+        "계산하거나 지어낸 숫자를 쓰지 않는다. [자료]에 판정 보류와 담당자 할 일이 있으면 그 내용을 꼭 쓴다. 판정은 건축물 데이터 기반 추정이며 법률 판단이 아니고 담당자 확인이 필요하다는 점을 끝에 적는다. 줄표(—)를 쓰지 않는다.",
         "[자료]\n" + ctx, DRAFT_MAX_TOKENS, false);
       state.tokens += r.tokens;
       text = r.text;
     }
     state.draft = (text || fallback).replace(/—/g, ", ");
+    // 판정 보류인데 모델이 할 일을 빠뜨렸으면 덧붙인다
+    if (!state.judged && state.plan && state.plan.hold && state.draft.indexOf(TODO_DECREE) < 0) state.draft += " 담당자 할 일: " + TODO_DECREE + ".";
     state.draftCtx = ctx;
     state.unverified = numbersNotInContext(state.draft, ctx, note || "");
     return { draft: state.draft, unverified: state.unverified, template: !text };
@@ -299,9 +341,15 @@ async function run(D, no, note, llm) {
     }
     const v = Criteria.verify(cands, bill.summary);
     state.extracted = v;
+    state.plan = planFor(v);
     return {
       method: how + " 추출 · 원문 대조",
       rule: v.rule,
+      judgeable: judgeable(v.rule),
+      use_rule: state.plan.use_rule,
+      use_rule_source: state.plan.source,
+      hold: state.plan.hold || null,
+      plan_note: state.plan.note || null,
       evidence: v.evidence,
       dropped: v.dropped,
       demo_rule: demo ? { rule: demo.rule, source_text: demo.source_text, method: demo.method, note: "판정 시범 규칙 (데이터 만들 때 전체 요약 원문과 대조 통과)" } : null,
@@ -310,7 +358,7 @@ async function run(D, no, note, llm) {
 
   function crosscheck() {
     const X = D.cross && D.cross.bills && D.cross.bills[no];
-    const useExtracted = state.extracted && Object.keys(state.extracted.rule).length;
+    const useExtracted = state.extracted && judgeable(state.extracted.rule);
     const mine = useExtracted ? state.extracted.rule : demo ? demo.rule : {};
     const basis = useExtracted ? "원문 대조 통과 기준" : demo ? "판정 시범 규칙" : "비교할 기준 없음";
     const texts = Criteria.ruleTexts(mine);
@@ -335,6 +383,10 @@ async function run(D, no, note, llm) {
 
   function judgeBuildings(rule) {
     const ok = checkRule(rule);
+    if (ok.no_split) {
+      const p = state.plan || planFor(state.extracted);
+      return { error: ok.error, next: p.use_rule ? "use_rule(" + p.source + ")로 judge_buildings 를 다시 부르세요" : "판정하지 말고 draft_review 를 부르세요 (" + p.hold + ")" };
+    }
     if (ok.error) return { error: ok.error };
     const clean = JSON.parse(JSON.stringify(ok.rule));
     const J = Judge.countAll(D.props, clean);
@@ -370,7 +422,7 @@ async function run(D, no, note, llm) {
       const t = Criteria.ruleTexts(r.rule);
       return "원문 대조 통과 기준 " + Object.keys(t).length + "개" + (Object.keys(t).length ? " (" + Object.keys(t).map((k) => k + " " + t[k]).join(", ") + ")" : "") +
         (r.dropped.length ? ", 근거가 맞지 않아 버린 기준 " + r.dropped.length + "개" : "") +
-        notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "");
+        notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "") + (r.plan_note ? " · " + r.plan_note : "");
     }
     if (name === "crosscheck") return r.summary;
     if (name === "judge_buildings") {
@@ -423,6 +475,7 @@ async function run(D, no, note, llm) {
     evidence: state.extracted ? state.extracted.evidence : [],
     rule_source: state.judged ? state.judged.source : null,
     counts: state.judged ? state.judged.counts : null,
+    hold: !state.judged && state.plan && state.plan.hold ? state.plan.hold : null,
     region: D.region,
     total: D.total,
     crosscheck: state.cross,
