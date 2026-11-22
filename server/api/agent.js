@@ -147,6 +147,7 @@ function openaiLLM(key, model) {
 // AGENT_MOCK_SCRIPT=tokens 이면 호출마다 토큰을 많이 쓴 것처럼 센다(토큰 제한 시험),
 // AGENT_MOCK_SCRIPT=invent 이면 근거 없는 규칙으로 판정을 시도한다(규칙 거절 시험),
 // AGENT_MOCK_SCRIPT=nosplit 이면 위임만 든 규칙으로 판정을 시도한다(판정할 기준 없음 시험).
+// AGENT_MOCK_SCRIPT=nodeleg 이면 추출 결과에서 위임을 뺀다(모델이 위임을 빠뜨린 경우 시험).
 function mockLLM() {
   const script = process.env.AGENT_MOCK_SCRIPT || "normal";
   const tokens = script === "tokens" ? 5000 : 400;
@@ -196,6 +197,7 @@ function mockLLM() {
       return { message: { role: "assistant", content: "끝" }, tokens };
     },
     complete: async () => ({ text: "", tokens: script === "tokens" ? 5000 : 300 }), // 빈 글 → 서버가 틀 문장을 씀
+    filterCandidates: script === "nodeleg" ? (cands) => cands.filter((c) => c.attr !== "위임") : null,
   };
 }
 
@@ -216,15 +218,17 @@ function judgeable(rule) {
 }
 const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·사용승인 기준 없이 위임만 있거나 비어 있음)";
 const HOLD_DELEG = "판정 보류: 시행령(대통령령 등)에 위임돼 기준 확정 전";
-const HOLD_NONE = "판정 보류: 요약 원문에서 근거 있는 판정 기준을 찾지 못함";
+const HOLD_NONE = "판정 보류: 요약문에서 판정 기준을 찾지 못함";
 const DEMO_FALLBACK_DELEG = "추출 기준이 위임뿐이라 시범 규칙 사용";
 const DEMO_FALLBACK_NONE = "근거 있는 추출 기준이 없어 시범 규칙 사용";
 const TODO_DECREE = "시행령 입법예고 확인";
+const TODO_ORIGINAL = "법안 원문(조문 대비표) 확인";
+const DELEG_CHECKED = "위임 문구는 원문에서 직접 확인";
 
 async function run(D, no, note, llm) {
   const bill = D.byNo[no];
   const demo = D.demos[no] || null;
-  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, draft: "", draftCtx: "", unverified: [] };
+  const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, delegation: [], draft: "", draftCtx: "", unverified: [] };
   const overBudget = () => state.tokens >= TOKEN_CAP;
 
   // 판정에 넘긴 규칙은 원문 대조를 통과한 규칙이나 판정 시범 규칙과 똑같아야 한다.
@@ -245,13 +249,14 @@ async function run(D, no, note, llm) {
     return JSON.stringify(out);
   }
   // 추출 결과로 판정 방법을 정한다: 추출 규칙 / 시범 규칙 대체 / 판정 보류
+  // 위임 여부는 모델 결과가 아니라 원문 위임 문구(코드로 찾음)와 원문 대조를 통과한 위임 기준으로 정한다
   function planFor(extracted) {
     const r = extracted ? extracted.rule : {};
     if (judgeable(r)) return { use_rule: r, source: "원문 대조 통과 기준", note: "" };
-    const onlyDeleg = !!(r && r.위임 && r.위임.length);
-    if (demo) return { use_rule: demo.rule, source: "판정 시범 규칙", note: onlyDeleg ? DEMO_FALLBACK_DELEG : DEMO_FALLBACK_NONE };
-    const hold = onlyDeleg ? HOLD_DELEG : HOLD_NONE;
-    return { use_rule: null, source: null, hold, note: hold };
+    const deleg = !!(r && r.위임 && r.위임.length) || state.delegation.length > 0;
+    if (demo) return { use_rule: demo.rule, source: "판정 시범 규칙", note: deleg ? DEMO_FALLBACK_DELEG : DEMO_FALLBACK_NONE };
+    const hold = deleg ? HOLD_DELEG : HOLD_NONE;
+    return { use_rule: null, source: null, hold, todo: deleg ? TODO_DECREE : TODO_ORIGINAL, note: hold };
   }
 
   function checkRule(rule) {
@@ -286,7 +291,8 @@ async function run(D, no, note, llm) {
       lines.push("주요 사유: " + state.judged.top.map((r) => r.status + " " + r.reason + " " + r.n + "동").join(", "));
     } else if (state.plan && state.plan.hold) {
       lines.push(state.plan.hold);
-      lines.push("담당자 할 일: " + TODO_DECREE + " (위임된 기준이 정해지면 다시 판정)");
+      if (state.delegation.length) lines.push("원문 위임 문구: " + state.delegation.map((d) => d.quote).join(" / "));
+      lines.push("담당자 할 일: " + state.plan.todo + (state.plan.todo === TODO_DECREE ? " (위임된 기준이 정해지면 다시 판정)" : " (요약문에 없는 조문 기준이 있는지 확인)"));
     } else lines.push("판정: 근거 있는 기준이 없어 건물 판정을 하지 않음");
     if (note) lines.push("담당자 검토 관점: " + note);
     const ctx = lines.join("\n");
@@ -298,7 +304,7 @@ async function run(D, no, note, llm) {
       `의안번호 ${b.no} 「${b.name}」은 ${b.committee} 소관으로 ${b.date}에 제안되었습니다.`,
       state.extracted && !Object.keys(state.extracted.rule).length ? "공개된 요약 원문에서는 근거 문구가 맞는 건물 기준을 찾지 못했습니다." : "",
       Object.keys(crit).length ? "검토에 쓴 적용 기준은 " + state.judged.source + "인 " + Object.keys(crit).map((k) => k + " " + crit[k]).join(", ") + "입니다." :
-        state.plan && state.plan.hold ? state.plan.hold + "이라 건물 판정은 하지 않았습니다. 담당자 할 일: " + TODO_DECREE + "." :
+        state.plan && state.plan.hold ? state.plan.hold + "이라 건물 판정은 하지 않았습니다. 담당자 할 일: " + state.plan.todo + "." :
         "판정에 쓸 수 있는 근거 있는 기준이 없어 건물 판정은 하지 않았습니다.",
       c ? `이 기준을 ${D.region} 건축물 ${fmt(D.total)}동에 적용하면 대상 ${fmt(c["대상"])}동, 경계선 ${fmt(c["경계선"])}동, 비대상 ${fmt(c["비대상"])}동, 판정불가 ${fmt(c["판정불가"])}동으로 추정됩니다.` : "",
       state.cross ? "출처별 기준 비교 결과는 " + state.cross.summary + "입니다." : "",
@@ -316,7 +322,7 @@ async function run(D, no, note, llm) {
     }
     state.draft = (text || fallback).replace(/—/g, ", ");
     // 판정 보류인데 모델이 할 일을 빠뜨렸으면 덧붙인다
-    if (!state.judged && state.plan && state.plan.hold && state.draft.indexOf(TODO_DECREE) < 0) state.draft += " 담당자 할 일: " + TODO_DECREE + ".";
+    if (!state.judged && state.plan && state.plan.hold && state.draft.indexOf(state.plan.todo) < 0) state.draft += " 담당자 할 일: " + state.plan.todo + ".";
     state.draftCtx = ctx;
     state.unverified = numbersNotInContext(state.draft, ctx, note || "");
     return { draft: state.draft, unverified: state.unverified, template: !text };
@@ -325,6 +331,7 @@ async function run(D, no, note, llm) {
   async function extractCriteria() {
     let cands = Criteria.extractCandidates(bill.summary);
     let how = "정규식";
+    if (llm.filterCandidates) cands = llm.filterCandidates(cands); // 시험용 가짜 모델만 (모델이 위임을 빠뜨린 경우 흉내)
     if (llm.name !== "mock" && !overBudget()) {
       try {
         const r = await llm.complete(
@@ -341,6 +348,8 @@ async function run(D, no, note, llm) {
     }
     const v = Criteria.verify(cands, bill.summary);
     state.extracted = v;
+    // 위임 문구는 모델과 상관없이 원문에서 코드로 찾는다 (모델이 빠뜨려도 같은 결과)
+    state.delegation = Criteria.findDelegation(bill.summary).map((d) => ({ value: d.value, by: d.by, quote: d.quote }));
     state.plan = planFor(v);
     return {
       method: how + " 추출 · 원문 대조",
@@ -349,6 +358,8 @@ async function run(D, no, note, llm) {
       use_rule: state.plan.use_rule,
       use_rule_source: state.plan.source,
       hold: state.plan.hold || null,
+      hold_todo: state.plan.todo || null,
+      delegation: state.delegation,
       plan_note: state.plan.note || null,
       evidence: v.evidence,
       dropped: v.dropped,
@@ -422,7 +433,9 @@ async function run(D, no, note, llm) {
       const t = Criteria.ruleTexts(r.rule);
       return "원문 대조 통과 기준 " + Object.keys(t).length + "개" + (Object.keys(t).length ? " (" + Object.keys(t).map((k) => k + " " + t[k]).join(", ") + ")" : "") +
         (r.dropped.length ? ", 근거가 맞지 않아 버린 기준 " + r.dropped.length + "개" : "") +
-        notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "") + (r.plan_note ? " · " + r.plan_note : "");
+        notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "") +
+        (r.delegation && r.delegation.length ? " · " + DELEG_CHECKED + " (" + Array.from(new Set(r.delegation.map((d) => d.by + "으로 정하는 " + d.value))).join(", ") + ")" : "") +
+        (r.plan_note ? " · " + r.plan_note : "");
     }
     if (name === "crosscheck") return r.summary;
     if (name === "judge_buildings") {
@@ -476,6 +489,8 @@ async function run(D, no, note, llm) {
     rule_source: state.judged ? state.judged.source : null,
     counts: state.judged ? state.judged.counts : null,
     hold: !state.judged && state.plan && state.plan.hold ? state.plan.hold : null,
+    hold_todo: !state.judged && state.plan && state.plan.hold ? state.plan.todo : null,
+    delegation: state.delegation,
     region: D.region,
     total: D.total,
     crosscheck: state.cross,
