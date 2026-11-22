@@ -165,7 +165,7 @@ python -m http.server 8000 --directory web
 
 로그인·서버 저장이 없는 시연용 공개 화면이며, 도입 시에는 행정망 내부에서만 씁니다. 진행 기록은 브라우저(localStorage)에만 남습니다.
 
-AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 씁니다(GitHub Pages에는 OpenAI 키를 둘 수 없음). 키는 Vercel 환경변수 `OPENAI_API_KEY`에만 있습니다. 행정 화면 설정에서 「질의 도우미 사용」을 끄면 두 기능 모두 서버에 연결하지 않습니다. 다시 배포: `cd server && npx vercel deploy --prod`
+AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 씁니다(GitHub Pages에는 OpenAI 키를 둘 수 없음). 키는 Vercel 환경변수 `OPENAI_API_KEY`에만 있습니다. 행정 화면 설정에서 「질의 도우미 사용」을 끄면 두 기능 모두 서버에 연결하지 않습니다. 서버 배포는 자동이 아닙니다(Vercel 프로젝트가 저장소와 연결되지 않음). `server/`를 고쳐 main에 병합한 뒤 `cd server && npx vercel deploy --prod`로 직접 배포합니다. `server/.vercelignore`가 `.env*` 파일을 올리지 않게 막습니다.
 
 | 기능 | 파일 | 하는 일 |
 | :--- | :--- | :--- |

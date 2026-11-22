@@ -92,6 +92,40 @@ test("근거 없는 기준은 버림 (문구가 원문에 없거나 수치가 �
   assert.strictEqual(v.dropped.length, 2);
 });
 
+test("2220631: 근거 \"의료시설, 노유자시설 등…\" 에 창고시설을 붙이면 근거 문장에 없는 값으로 제외", async () => {
+  const b = bills.find((x) => x.no === "2220631");
+  const quote = "예외적으로 의료시설, 노유자시설 등에는 강화된 기준을 적용할 수 있도록 함.";
+  assert.ok(Criteria.normText(b.summary).includes(quote), "시험 근거 문장이 요약에 있어야 함");
+  const v = Criteria.verify([{ attr: "용도", value: ["18000"], quote }], b.summary);
+  assert.strictEqual(v.rule.용도, undefined);
+  assert.strictEqual(v.dropped.length, 1);
+  assert.ok(v.dropped[0].why.indexOf(Criteria.NOT_IN_QUOTE) === 0, v.dropped[0].why);
+  // 같은 문장의 노유자시설(11000)은 남고, 창고시설만 빠진다
+  const w = Criteria.verify([{ attr: "용도", value: ["11000", "18000"], quote }], b.summary);
+  assert.deepStrictEqual(w.rule.용도, ["11000"]);
+});
+
+test("하위 시설 이름(물류터미널)이 근거에 있으면 상위 분류(창고시설)를 받아들임, 운수시설은 제외", async () => {
+  const s = "연면적이 10만제곱미터 이상인 물류터미널에도 강화된 소방시설 기준을 적용함.";
+  const ok = Criteria.verify([{ attr: "용도", value: ["18000"], quote: s }], s);
+  assert.deepStrictEqual(ok.rule.용도, ["18000"]);
+  const bad = Criteria.verify([{ attr: "용도", value: ["08000"], quote: s }], s);
+  assert.strictEqual(bad.rule.용도, undefined);
+  assert.ok(/근거 문장에 없는 값 제외/.test(bad.dropped[0].why));
+  // 정규식 추출도 물류터미널을 창고시설로 뽑는다
+  assert.deepStrictEqual(Criteria.extract(s).rule.용도, ["18000"]);
+});
+
+test("숫자·단위가 근거 문장에 없으면 제외 (층 없이 숫자만, 면적 단위 없음)", async () => {
+  const s = "건축물 3개 동 이상과 연면적 500 이상인 경우 적용함.";
+  const v = Criteria.verify([
+    { attr: "층수", bound: "min", value: 3, quote: s },
+    { attr: "연면적", bound: "min", value: 500, quote: s },
+  ], s);
+  assert.deepStrictEqual(v.rule, {});
+  assert.strictEqual(v.dropped.filter((d) => d.why.indexOf(Criteria.NOT_IN_QUOTE) === 0).length, 2);
+});
+
 test("의안번호가 7자리가 아니면 400, 없는 번호면 404", async () => {
   assert.strictEqual((await call(handler, { body: { bill: "12345" } })).code, 400);
   assert.strictEqual((await call(handler, { body: { bill: "22064361" } })).code, 400);
