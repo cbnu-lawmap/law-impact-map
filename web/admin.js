@@ -13,15 +13,25 @@
  *   #/print/번호  검토서   #/progress  진행 현황   #/rules  판정 규칙·검증   #/sources  데이터·한계
  *
  * 로그인·서버 저장이 없다. 진행 기록은 이 브라우저(localStorage)에만 남고, 담당자끼리는 CSV로 주고받는다.
- * 질의 도우미만 별도 서버(server/api/ask.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
- * 설정에서 질의 도우미를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
+ * 질의 도우미와 검토 에이전트만 별도 서버(server/api/ask.js, agent.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
+ * 설정에서 질의 도우미(AI)를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
+ * 로컬 시험: localhost 에서 열고 ?api=http://localhost:3000 을 붙이면 그 서버에 묻는다 (server/scripts/dev-server.js).
  *
  * 화면 찍기용: 주소에 ?shot=1 을 붙이면 역할 고르기 창·둘러보기를 띄우지 않고, 아무것도 저장하지 않는다.
  */
 (function () {
   "use strict";
 
-  var ASK_URL = "https://ppaegok-api.vercel.app/api/ask";
+  var API_BASE = "https://ppaegok-api.vercel.app";
+  // 로컬 시험용: localhost 에서 연 화면만 ?api=http://localhost:포트 로 서버를 바꿀 수 있다
+  (function () {
+    var m = location.search.match(/[?&]api=([^&]+)/);
+    if (!m || !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
+    var u = decodeURIComponent(m[1]).replace(/\/$/, "");
+    if (/^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(u)) API_BASE = u;
+  })();
+  var ASK_URL = API_BASE + "/api/ask";
+  var AGENT_URL = API_BASE + "/api/agent";
   var STATUSES = Judge.STATUSES; // 대상, 경계선, 비대상, 판정불가
   var PAGE = 50;
   // 진행 상태. 화면에서는 모양(빈 원·반쪽 원·마름모·꽉 찬 원)+색+글자 배지로 보인다 (admin.css .pg-*)
@@ -619,16 +629,18 @@
     var links = '<div class="toolbar no-print"><a class="btn ghost" href="index.html?bill=' + no + '">지도에서 보기</a>' +
       '<a class="btn ghost" href="' + esc(b.link) + '" target="_blank" rel="noopener">의안정보시스템 원문</a>' +
       '<button type="button" class="btn ghost ai-only" id="ask-this">이 법안 질문하기</button>' +
+      '<button type="button" class="btn ghost ai-only" id="agent-run">에이전트로 검토 초안 만들기</button>' +
       (demo ? '<a class="btn" href="#/print/' + no + '">검토서 인쇄·한글</a>' : "") + "</div>";
 
     if (!demo) {
-      $view.innerHTML = billHead(b) + links + progressBox(no) +
+      $view.innerHTML = billHead(b) + links + agentBox(no) + progressBox(no) +
         '<div class="note-box">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않아 건물 판정이 없습니다. ' +
         "AI 기준 추출 단계에서 판정할 예정입니다.</div>" +
         '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>" +
         '<div id="xc-box"></div>';
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      bindAgent(no);
       fillCross(no);
       return;
     }
@@ -638,7 +650,7 @@
       if (location.hash !== "#/bill/" + no) return; // 그사이 다른 화면으로 옮김
       var J = judgeBill(no);
       var cs = checkStats(no);
-      var html = billHead(b) + links + progressBox(no);
+      var html = billHead(b) + links + agentBox(no) + progressBox(no);
       html += '<div class="counts">' + STATUSES.map(function (s) {
         return '<div class="c"><div class="k"><i class="s-' + s + '"></i>' + s + '</div><div class="v">' + fmt(J.counts[s]) +
           '동</div><div class="p">' + pct(J.counts[s], D.total) + "</div></div>";
@@ -674,6 +686,7 @@
       drawRoster(no);
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      bindAgent(no);
       fillCross(no);
       document.getElementById("r-csv").addEventListener("click", function () {
         var rows = J.rows.filter(function (r) { return r.status === ui.roster.tab; });
@@ -1226,6 +1239,100 @@
     fetch(ASK_URL).then(function (r) { return r.json(); }).then(function (j) {
       el.innerHTML = '<i class="dot ' + (j.ok ? "ok" : "bad") + '"></i>질의 도우미 ' + (j.ok ? "연결됨" : "키 없음");
     }).catch(function () { el.innerHTML = '<i class="dot bad"></i>질의 도우미 연결 안 됨'; });
+  }
+
+  // ---------------------------------------------------------------- 검토 에이전트 (AI, 별도 서버 /api/agent)
+  // 서버의 AI 가 도구(법안 읽기, 기준 뽑기, 출처 비교, 건물 판정, 초안 쓰기)를 골라 부른 순서와 이유, 결과, 초안을 보인다.
+  var agentState = {}; // 번호 -> { busy } | { result } | { error }  (화면을 다시 그려도 남게)
+  var AGENT_TOOLS = ["법안 정보 읽기", "적용 기준 뽑기", "출처별 기준 비교", "건물 판정 집계", "검토 초안 쓰기"];
+  function agentBox(no) {
+    return '<div class="ai-only no-print" id="agent-box" aria-live="polite">' + agentHtml(no) + "</div>";
+  }
+  function agentHead(j) {
+    return '<div class="agent-head"><h3>검토 초안 (에이전트)</h3><span class="tag check">사람 확인 필요 · AI 초안</span>' +
+      '<span class="tag wait">추정 · 사람 확인 전</span>' + (j && j.cached ? '<span class="tag wait">10분 안에 만든 결과 다시 보기</span>' : "") + "</div>";
+  }
+  function agentHtml(no) {
+    var st = agentState[no];
+    if (!st) return "";
+    if (st.busy) {
+      return '<div class="card agent-card">' + agentHead() +
+        '<p class="muted small" style="margin:6px 0">에이전트가 도구를 골라 부르며 검토하는 중입니다. 보통 10초에서 30초쯤 걸립니다 (최대 8단계).</p>' +
+        '<ol class="agent-steps">' + AGENT_TOOLS.map(function (t) {
+          return '<li class="wait"><b>' + esc(t) + '</b> <span class="muted small">순서는 에이전트가 정합니다</span></li>';
+        }).join("") + "</ol></div>";
+    }
+    if (st.error) {
+      return '<div class="card agent-card">' + agentHead() + '<div class="note-box">검토 초안을 만들지 못했습니다: ' + esc(st.error) + "</div></div>";
+    }
+    var j = st.result;
+    if (j.fixed) return '<div class="card agent-card">' + agentHead() + '<div class="note-box">' + esc(j.answer) + "</div></div>";
+    var html = '<div class="card agent-card">' + agentHead(j);
+    html += '<p class="small muted" style="margin:6px 0 10px">AI 가 고른 순서대로 적었습니다. 판정은 건축물 데이터로 추정한 결과이며 법률 판단이 아닙니다. 담당자가 원문과 대조한 뒤에 쓰세요.</p>';
+    html += '<ol class="agent-steps">' + (j.steps || []).map(function (s) {
+      return "<li" + (s.ok ? "" : ' class="bad"') + "><b>" + esc(s.tool_ko || s.tool) + "</b>" +
+        '<div class="small"><span class="muted">고른 이유</span> ' + esc(s.why) + "</div>" +
+        '<div class="small"><span class="muted">결과</span> ' + esc(s.summary) + "</div></li>";
+    }).join("") + "</ol>";
+    if (j.limits && j.limits.stopped) html += '<p class="small agent-warn">' + esc(j.limits.stopped) + ". 결과가 덜 모였을 수 있습니다.</p>";
+    html += '<div class="field-label">초안</div><div class="quote agent-draft">' + esc(j.draft) + "</div>";
+    if (j.unverified && j.unverified.length) html += '<p class="small agent-warn">근거 자료에 없는 숫자: ' + esc(j.unverified.join(", ")) + ". 직접 확인하세요.</p>";
+    if (j.counts) {
+      html += '<div class="field-label">건물 판정 (' + esc(j.region) + " " + fmt(j.total) + "동, " + esc(j.rule_source || "") + ")</div>" +
+        '<ul class="agent-counts">' + STATUSES.map(function (s) {
+          return '<li><i class="sw s-' + s + '" aria-hidden="true"></i>' + s + " <b>" + fmt(j.counts[s]) + "동</b></li>";
+        }).join("") + "</ul>";
+      if (j.rule) html += '<div class="small muted">적용 규칙: ' + esc(ruleText(j.rule).join(" · ")) + "</div>";
+    } else {
+      html += '<p class="small muted">근거가 확인된 기준이 없어 건물 판정은 하지 않았습니다.</p>';
+    }
+    var xc = j.crosscheck;
+    if (xc) {
+      html += '<div class="field-label" style="margin-top:10px">출처별 기준 비교</div><p class="small" style="margin:4px 0">' + esc(xc.summary) + "</p>";
+      if (xc.found && xc.compare && xc.compare.length) {
+        html += '<div class="table-wrap"><table class="dt"><thead><tr><th>기준</th><th>에이전트</th><th>우리 AI</th><th>규칙 기반</th><th>판정</th></tr></thead><tbody>' +
+          xc.compare.map(function (c) {
+            return "<tr><td>" + esc(c.attr) + "</td><td>" + xcCell(c.agent) + "</td><td>" + xcCell(c.ours) + "</td><td>" + xcCell(c.rule) +
+              '</td><td style="white-space:nowrap">' + xcChip(c.status) + "</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }
+    }
+    html += '<div class="toolbar" style="margin:10px 0 0"><span class="muted small">모델 ' + esc(j.model) + (j.tokens != null ? " · 토큰 " + fmt(j.tokens) : "") +
+      '</span><span class="spacer"></span><button type="button" class="btn ghost" id="agent-again">다시 만들기</button></div>';
+    return html + "</div>";
+  }
+  function drawAgent(no) {
+    var box = document.getElementById("agent-box");
+    if (box && location.hash === "#/bill/" + no) { box.innerHTML = agentHtml(no); bindAgentAgain(no); }
+  }
+  function bindAgentAgain(no) {
+    var again = document.getElementById("agent-again");
+    if (again) again.addEventListener("click", function () { runAgent(no); });
+  }
+  function bindAgent(no) {
+    var b = document.getElementById("agent-run");
+    if (b) b.addEventListener("click", function () { runAgent(no); });
+    bindAgentAgain(no);
+  }
+  function runAgent(no) {
+    if (!prefs.ai) return; // 꺼져 있으면 서버에 묻지 않는다
+    if (agentState[no] && agentState[no].busy) return;
+    agentState[no] = { busy: true };
+    var btn = document.getElementById("agent-run");
+    if (btn) btn.disabled = true;
+    drawAgent(no);
+    fetch(AGENT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill: no }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || "서버 응답 " + r.status); return j; }); })
+      .then(function (j) { agentState[no] = { result: j }; })
+      .catch(function (e) {
+        var msg = e && e.message === "Failed to fetch" ? "서버에 연결하지 못했습니다" : (e && e.message) || "알 수 없는 오류";
+        agentState[no] = { error: msg };
+      })
+      .then(function () {
+        var b2 = document.getElementById("agent-run");
+        if (b2) b2.disabled = false;
+        drawAgent(no);
+      });
   }
 
   // ---------------------------------------------------------------- 라우터

@@ -341,6 +341,22 @@ body:not(.audit) .audit-only { display: none !important; }
 body.audit .work-only { display: none !important; }
 body.no-ai .ai-only { display: none !important; }
 
+/* ---------------------------------------------------------------- 검토 에이전트 (법안 상세) */
+.agent-card { margin-bottom: 16px; border-color: var(--warn-line); }
+.agent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent-head h3 { margin: 0; }
+.agent-steps { margin: 4px 0 12px; padding-left: 22px; font-size: var(--fs-sm); }
+.agent-steps li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.agent-steps li:last-child { border-bottom: 0; }
+.agent-steps li > div { margin-top: 2px; color: var(--ink-2); }
+.agent-steps li .muted { display: inline-block; min-width: 56px; }
+.agent-steps li.wait b { color: var(--muted); font-weight: 600; }
+.agent-steps li.bad b { color: var(--warn); }
+.agent-draft { white-space: pre-wrap; line-height: 1.7; }
+.agent-warn { color: var(--warn); }
+.agent-counts { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 6px; padding: 0; font-size: var(--fs-sm); }
+.agent-counts b { font-variant-numeric: tabular-nums; }
+
 /* ---------------------------------------------------------------- 하단 상태 바 (얇고 조용하게) */
 .status {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; height: var(--status-h);
