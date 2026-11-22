@@ -28,7 +28,7 @@ jobs:
       - name: Collect
         env:
           VWORLD_KEY: ${{ secrets.VWORLD_KEY }}
-        run: python collect/collect_zoning.py
+        run: python -u collect/collect_zoning.py
       - name: Commit
         run: |
           f="data/zoning_사창동.csv"

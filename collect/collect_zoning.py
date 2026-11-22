@@ -40,6 +40,7 @@ ZONE_LAYERS = ["LT_C_UQ111", "LT_C_UQ112", "LT_C_UQ113", "LT_C_UQ114"]
 EXTRA_LAYERS = ["LT_C_UD801", "LT_C_UPISUQ161"]
 SIZE = 1000
 MAX_PAGES = 20
+WAITS = (5,)  # 연결이 안 되면 오래 기다리지 않고 바로 알린다
 
 
 def load_buildings():
@@ -64,7 +65,7 @@ def fetch_layer(layer, box, key, session):
             "geometry": "true", "attribute": "true",
         }
         try:
-            js = get_json(ENDPOINT, params, label=layer, session=session)
+            js = get_json(ENDPOINT, params, label=layer, session=session, waits=WAITS)
         except ApiError as e:
             return None, str(e)
         resp = js.get("response", {}) if isinstance(js, dict) else {}
@@ -133,6 +134,8 @@ def main():
         if feats is None:
             print("  %s 오류: %s" % (layer, err))
             errors.append(layer)
+            if "Error" in err or "Timeout" in err:
+                raise SystemExit("브이월드에 연결하지 못함: %s" % err)
             continue
         print("  %s 도형 %d개" % (layer, len(feats)))
         if feats:
