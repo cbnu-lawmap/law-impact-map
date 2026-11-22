@@ -49,8 +49,9 @@ const TOOL_KO = {
 let dataCache = null;
 async function loadData() {
   if (dataCache && Date.now() - dataCache.at < CACHE_MS) return dataCache;
-  const [b, d, x, g] = await Promise.all([
+  const [b, d, x, g, sm] = await Promise.all([
     loadJson("bills.json"), loadJson("demo_rules.json"), loadJson("crosscheck.json"), loadJson("buildings.geojson"),
+    loadJson("summaries.json").catch(() => null),   // 제안이유 전문 (없으면 bills.json 의 300자 요약)
   ]);
   const demos = {};
   d.demos.forEach((v) => { demos[v.bill_no] = v; });
@@ -67,7 +68,8 @@ async function loadData() {
     loadJson("models/pass_prediction.json").catch(() => null),
   ]);
   const models = { field: fm ? loadModel(fm) : null, pass: pm || null };
-  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models };
+  const full = (sm && sm.summaries) || {};
+  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models, full };
   return dataCache;
 }
 
@@ -245,6 +247,9 @@ const DELEG_CHECKED = "위임 문구는 원문에서 직접 확인";
 async function run(D, no, note, llm) {
   const bill = D.byNo[no];
   const demo = D.demos[no] || null;
+  // 기준 뽑기·원문 대조는 300자로 자른 화면용 요약이 아니라 제안이유 전문으로 한다
+  const fullText = (D.full && D.full[no]) || String(bill.summary || "").replace(/…$/, "");
+  const fullUsed = !!(D.full && D.full[no]);
   const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, delegation: [], field: null, pass: null, draft: "", draftCtx: "", unverified: [] };
   const overBudget = () => state.tokens >= TOKEN_CAP;
 
@@ -294,7 +299,7 @@ async function run(D, no, note, llm) {
     const b = state.bill || bill;
     const lines = [];
     lines.push(`법안 ${b.no} ${b.name} | 위원회 ${b.committee} | 제안일 ${b.date} | 단계 ${b.stage || "정보 없음"}${b.stage_date ? " (" + b.stage_date + ")" : ""}`);
-    lines.push("요약: " + String(b.summary).slice(0, 600));
+    lines.push("요약: " + fullText.slice(0, 800));
     if (state.extracted) {
       const t = Criteria.ruleTexts(state.extracted.rule);
       lines.push("원문 대조 통과 기준: " + (Object.keys(t).length ? Object.keys(t).map((k) => k + " " + t[k]).join(", ") : "없음"));
@@ -349,7 +354,7 @@ async function run(D, no, note, llm) {
   }
 
   async function extractCriteria() {
-    let cands = Criteria.extractCandidates(bill.summary);
+    let cands = Criteria.extractCandidates(fullText);
     let how = "정규식";
     if (llm.filterCandidates) cands = llm.filterCandidates(cands); // 시험용 가짜 모델만 (모델이 위임을 빠뜨린 경우 흉내)
     if (llm.name !== "mock" && !overBudget()) {
@@ -360,19 +365,19 @@ async function run(D, no, note, llm) {
           Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자. " +
           "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
           "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.",
-          "[요약]\n" + bill.summary, CALL_MAX_TOKENS, true);
+          "[요약]\n" + fullText, CALL_MAX_TOKENS, true);
         state.tokens += r.tokens;
         const items = JSON.parse(r.text).items;
         if (Array.isArray(items)) { cands = items; how = "AI"; }
       } catch (e) { /* 실패하면 정규식 결과를 쓴다 */ }
     }
-    const v = Criteria.verify(cands, bill.summary);
+    const v = Criteria.verify(cands, fullText);
     state.extracted = v;
     // 위임 문구는 모델과 상관없이 원문에서 코드로 찾는다 (모델이 빠뜨려도 같은 결과)
-    state.delegation = Criteria.findDelegation(bill.summary).map((d) => ({ value: d.value, by: d.by, quote: d.quote }));
+    state.delegation = Criteria.findDelegation(fullText).map((d) => ({ value: d.value, by: d.by, quote: d.quote }));
     state.plan = planFor(v);
     return {
-      method: how + " 추출 · 원문 대조",
+      method: how + " 추출 · 원문 대조" + (fullUsed ? " (제안이유 전문 " + fullText.length + "자)" : " (300자 요약)"),
       rule: v.rule,
       judgeable: judgeable(v.rule),
       use_rule: state.plan.use_rule,
@@ -435,7 +440,7 @@ async function run(D, no, note, llm) {
   function classifyField() {
     const M = D.models && D.models.field;
     if (!M) return { error: "분야 분류 모델 파일이 아직 없습니다 (models/field_classifier.json)" };
-    const prob = M.predict(cleanSummary(bill.summary));
+    const prob = M.predict(cleanSummary(fullText));
     const top = prob.map((p, i) => ({ field: M.labels[i], p })).sort((a, b) => b.p - a.p).slice(0, 3)
       .map((x) => ({ field: x.field, name: (D.fields && D.fields[x.field]) || x.field, p: Math.round(x.p * 1000) / 1000 }));
     state.field = { top, metrics: M.metrics, current: bill.field != null ? String(bill.field) : null };
@@ -457,7 +462,7 @@ async function run(D, no, note, llm) {
     if (name !== "judge_buildings" && name !== "draft_review" && args.no && args.no !== no) return { error: "이번 검토 대상은 " + no + " 입니다" };
     if (name === "get_bill") {
       state.bill = bill;
-      return { no: bill.no, name: bill.name, committee: bill.committee, date: bill.date, stage: bill.stage || null, stage_date: bill.stage_date || null, summary: String(bill.summary).slice(0, 600) };
+      return { no: bill.no, name: bill.name, committee: bill.committee, date: bill.date, stage: bill.stage || null, stage_date: bill.stage_date || null, summary: fullText.slice(0, 1500), summary_chars: fullText.length, full_text: fullUsed };
     }
     if (name === "extract_criteria") return extractCriteria();
     if (name === "crosscheck") return crosscheck();

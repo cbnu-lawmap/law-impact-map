@@ -18,6 +18,7 @@ const ask = require("../api/ask");
 const Criteria = require("../lib/criteria");
 const bills = require(path.join(process.env.DATA_DIR, "bills.json")).bills;
 const demos = require(path.join(process.env.DATA_DIR, "demo_rules.json")).demos;
+const full = require(path.join(process.env.DATA_DIR, "summaries.json")).summaries;
 
 let ipSeq = 0;
 function call(fn, { method = "POST", body, origin = "http://localhost:8000", ip } = {}) {
@@ -51,9 +52,10 @@ test("2206436 끝까지 실행: 도구 순서, 동수 = 시범 규칙 동수, �
   assert.deepStrictEqual(j.steps.map((s) => s.tool), ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"]);
   j.steps.forEach((s) => { assert.ok(s.why && s.summary && s.ok, JSON.stringify(s)); });
   const demo = demos.find((d) => d.bill_no === "2206436");
+  // 제안이유 전문으로 뽑은 기준이 원문 대조를 통과하고 시범 규칙과 같다 (300자 요약일 때는 못 뽑아 시범 규칙을 썼음)
   assert.deepStrictEqual(j.rule, demo.rule);
   assert.deepStrictEqual(j.counts, demo.counts);
-  assert.strictEqual(j.rule_source, "판정 시범 규칙");
+  assert.strictEqual(j.rule_source, "원문 대조 통과 기준");
   assert.ok(j.draft.length > 50 && !j.draft.includes("—"));
   assert.strictEqual(j.needs_human_review, true);
   assert.strictEqual(j.cached, false);
@@ -63,6 +65,17 @@ test("2206436 끝까지 실행: 도구 순서, 동수 = 시범 규칙 동수, �
   assert.strictEqual(r.headers["Access-Control-Allow-Origin"], "http://localhost:8000");
 });
 
+test("get_bill·extract_criteria 는 300자 요약이 아니라 제안이유 전문을 읽음", async () => {
+  const no = "2208341";
+  assert.ok(full[no].length > 300, "시험 법안 전문이 300자보다 길어야 함");
+  const r = await call(handler, { body: { bill: no, note: "전문" } });
+  const ex = r.body.steps.find((s) => s.tool === "extract_criteria");
+  assert.ok(ex && ex.ok);
+  // 근거 문구가 모두 전문 안에 있고, 그중 300자 요약에는 없는 부분에서 나온 것도 받아들인다
+  const norm = Criteria.normText(full[no]);
+  r.body.evidence.forEach((e) => assert.ok(norm.includes(e.quote), e.quote));
+});
+
 test("같은 법안 두 번째는 저장한 결과 (cached: true)", async () => {
   const r = await call(handler, { body: { bill: "2206436" } });
   assert.strictEqual(r.code, 200);
@@ -70,11 +83,11 @@ test("같은 법안 두 번째는 저장한 결과 (cached: true)", async () => 
   assert.strictEqual(r.body.steps.length, 5);
 });
 
-test("판정 시범이 아닌 법안: 원문 대조 통과 기준으로 판정, 근거는 요약의 부분 문자열", async () => {
+test("판정 시범이 아닌 법안: 원문 대조 통과 기준으로 판정, 근거는 제안이유 전문의 부분 문자열", async () => {
   const b = bills.find((x) => x.no === "2220604");
   const r = await call(handler, { body: { bill: b.no } });
   assert.strictEqual(r.code, 200, JSON.stringify(r.body));
-  const norm = Criteria.normText(b.summary);
+  const norm = Criteria.normText(full[b.no]); // 근거는 제안이유 전문의 부분 문자열
   assert.ok(r.body.evidence.length > 0);
   r.body.evidence.forEach((e) => assert.ok(norm.includes(e.quote), e.quote));
   assert.ok(r.body.counts, "판정 동수 없음");
