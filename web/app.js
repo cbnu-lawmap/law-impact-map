@@ -366,6 +366,14 @@
     });
   }
 
+  // 심사 단계 배지 (법사위 이후 진행 중이면 강조, 종결이면 점선)
+  function stageBadge(b, withDate) {
+    if (!b.stage) return "";
+    var k = Judge.stageKind(b);
+    return '<span class="badge stage' + (k ? " " + k : "") + '" title="국회 심사 단계' + (b.stage_date ? " · " + esc(b.stage_date) : "") + '">' +
+      esc(b.stage) + (withDate && b.stage_date ? ' <span class="sub">' + esc(b.stage_date) + "</span>" : "") + "</span>";
+  }
+
   function renderBills() {
     var list = filteredBills();
     $("bill-count").textContent = "법안 " + fmt(list.length) + "건 / 전체 " + fmt(state.bills.length) + "건";
@@ -382,7 +390,7 @@
       return '<li tabindex="0" data-no="' + b.no + '"' + (state.selected === b.no ? ' class="active"' : "") + ">" +
         '<div class="b-name">' + esc(b.name) + "</div>" +
         '<div class="b-meta"><span>' + esc(b.date) + "</span><span>" + esc(b.committee) + "</span>" +
-        '<span class="badge">' + esc(state.fields[b.field] || "미분류") + "</span>" + badges + "</div></li>";
+        stageBadge(b) + '<span class="badge">' + esc(state.fields[b.field] || "미분류") + "</span>" + badges + "</div></li>";
     }).join("") || '<li class="muted">조건에 맞는 법안이 없습니다.</li>';
   }
 
@@ -400,7 +408,7 @@
       '<div class="b-meta"><span>의안번호 ' + esc(b.no) + "</span><span>" + esc(b.date) + "</span><span>" +
       esc(b.committee) + '</span><span class="badge" title="법안 내용으로 자동 분류한 분야입니다">' + esc(state.fields[b.field] || "미분류") +
       ' <span class="sub">자동 분류</span></span>' +
-      (b.conf != null && b.conf < CONF_LOW ? '<span class="badge uncertain">분류 확인 필요</span>' : "") + "</div>";
+      (b.conf != null && b.conf < CONF_LOW ? '<span class="badge uncertain">분류 확인 필요</span>' : "") + stageBadge(b, true) + "</div>";
 
     if (demo) {
       var res = Judge.countAll(state.props, demo.rule);
