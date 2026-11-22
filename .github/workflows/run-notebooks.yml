@@ -46,7 +46,11 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config core.autocrlf input
-          git add notebooks web/data/models data/*_pred.csv 2>/dev/null || true
+          # 경로마다 따로 추가한다 (없는 경로가 하나 있으면 git add 전체가 실패하므로)
+          git add notebooks
+          [ -d web/data/models ] && git add web/data/models
+          for f in data/*_pred.csv; do [ -e "$f" ] && git add "$f"; done
+          true
           git diff --cached --quiet && { echo "바뀐 것 없음"; exit 0; }
           git commit -m "chore: 노트북 실행 결과 저장 (Actions)"
           git push origin HEAD:${{ github.ref_name }}
