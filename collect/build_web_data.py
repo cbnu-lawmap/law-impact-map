@@ -3,6 +3,7 @@
 웹 지도(web/)용 데이터를 가볍게 만들어 web/data/ 에 저장한다.
 
   web/data/buildings.geojson  사창동 건물 (판정용 속성 6개만, 좌표 소수 6자리)
+                              지상층수가 빈 건물에는 신경망 추정 est_flr·est_p (참고용, 판정에 안 씀)
   web/data/boundary.geojson   사창동 행정동 경계
   web/data/bills.json         법안 목록 (bills_summary + bills_field_pred + bills_stage, BILL_NO 기준)
   web/data/demo_rules.json    판정 시범(사람 추출 2건 + AI 추출·원문 대조) 규칙과 결과 동수
@@ -395,6 +396,26 @@ def make_conclusion(d, counts, props):
     return s
 
 
+EST = os.path.join(DATA, "building_imputation_pred.csv")   # notebooks/building_imputation.ipynb 결과
+
+
+def load_estimates(features):
+    """지상층수가 빈 건물의 추정 구간 {파일 안 순서: (구간 이름, 확률)}. 파일이 없으면 빈 dict.
+    열쇠는 bldginfo geojson 안 순서(idx)이고, PNU 가 다르면 건물 순서가 바뀐 것이므로 멈춘다."""
+    if not os.path.exists(EST):
+        print("  building_imputation_pred.csv 없음: 추정 지상층수 없이 만듦")
+        return {}
+    est = {}
+    with open(EST, encoding="utf-8-sig", newline="") as f:
+        for r in csv.DictReader(f):
+            i = int(r["idx"])
+            if i >= len(features) or str(features[i]["properties"].get("pnu")) != r["pnu"]:
+                raise ValueError(f"building_imputation_pred.csv idx {i} 의 PNU 가 건물 자료와 다름 (노트북을 다시 실행할 것)")
+            est[i] = (r["est_flr"], round(float(r["est_p"]), 2))
+    print(f"  추정 지상층수: {len(est)}동 (참고용, 판정에 안 씀)")
+    return est
+
+
 SEEN = os.path.join(DATA, "bills_seen.csv")   # 법안을 처음 본 날 (매일 수집 워크플로가 갱신)
 
 
@@ -427,12 +448,16 @@ def main():
     # 1) 건물
     with open(os.path.join(DATA, f"bldginfo_{EMD}.geojson"), encoding="utf-8") as f:
         src = json.load(f)
+    est = load_estimates(src["features"])
     feats = []
-    for ft in src["features"]:
+    for i, ft in enumerate(src["features"]):
         p = ft["properties"]
         props = {k: p.get(k) for k in KEEP}
         if props["totalarea"] is not None:
             props["totalarea"] = round(float(props["totalarea"]), 2)
+        if i in est and empty(props["grnd_flr"]):
+            # 신경망 추정 지상층수 구간 (참고용). judge() 는 est_* 를 읽지 않으므로 판정에 쓰이지 않는다
+            props["est_flr"], props["est_p"] = est[i]
         feats.append({
             "type": "Feature",
             "geometry": {"type": ft["geometry"]["type"],
