@@ -1,6 +1,6 @@
 {
  "name": "pass_prediction",
- "threshold": 0.26,
+ "threshold": 0.27,
  "labels": [
   "낮음",
   "높음"
@@ -10,12 +10,12 @@
  ],
  "features": "법안 이름+요약 2~3글자 TF-IDF 3000, 위원회 3, 법안 종류 4, 요약 길이, 같은 법률 법안 수",
  "metrics": {
-  "test_acc": 0.633,
-  "test_auc": 0.737,
-  "test_f1": 0.615,
+  "test_acc": 0.665,
+  "test_auc": 0.743,
+  "test_f1": 0.633,
   "majority_acc": 0.642,
-  "logreg_auc": 0.748,
-  "time_split_auc": 0.624,
+  "logreg_auc": 0.75,
+  "time_split_auc": 0.625,
   "n_train": 1087,
   "n_test": 218,
   "trained_at": "2026-11-22"
