@@ -9,6 +9,10 @@ DATA = ROOT / "data"
 
 load_dotenv()
 KEY = os.getenv("ASSEMBLY_API_KEY")
+if not KEY:
+    # 키가 없으면 조용히 건너뛴다 (매일 수집 워크플로에서 비밀값이 없을 때)
+    print("ASSEMBLY_API_KEY 없음: 수집을 건너뜀")
+    raise SystemExit(0)
 SERVICE = "nzmimeepazxkubdpn"
 URL = f"https://open.assembly.go.kr/portal/openapi/{SERVICE}"
 PSIZE = 100

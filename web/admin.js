@@ -341,6 +341,7 @@
       " 기준 · 국회 계류 법안이 우리 동네 건물에 미치는 영향</p>";
     html += headline(judgedNos, judgedDone);
     html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
+    html += newBillsCard();
     html += nearPassCard();
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
@@ -416,6 +417,25 @@
     }
     html += '<p class="muted small near-dist">전체 심사 단계: ' + esc(dist || "정보 없음") + "</p></div>";
     return html;
+  }
+
+  // 매일 자동 수집으로 최근 7일 안에 처음 들어온 법안 (bills.json 의 added)
+  function newBillsCard() {
+    var d = new Date();
+    d.setDate(d.getDate() - 7);
+    var since = d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+    var list = D.bills.filter(function (b) { return b.added && b.added >= since; })
+      .sort(function (a, b) { return a.added < b.added ? 1 : a.added > b.added ? -1 : 0; });
+    var html = '<div class="card" id="new-bills" style="margin-top:16px"><h3 style="margin-top:0">새로 들어온 법안' +
+      '<span class="aside">최근 7일 · 매일 자동 수집</span></h3>';
+    if (!list.length) return html + '<p class="muted" style="margin:0">최근 7일 동안 새로 들어온 법안이 없습니다.</p></div>';
+    html += "<p style=\"margin:0 0 8px\"><b>" + fmt(list.length) + "건</b>이 새로 들어왔습니다. 분야는 자동으로 붙였으니 확인해 주세요.</p>" +
+      '<table class="dt"><tbody>' + list.slice(0, 5).map(function (b) {
+        return '<tr><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + '</a><div class="muted small">' +
+          esc(b.committee) + " · " + fieldTag(b) + '</div></td><td class="num muted">' + esc(ymd(b.added)) + " 들어옴</td></tr>";
+      }).join("") + "</tbody></table>";
+    if (list.length > 5) html += '<p class="muted small" style="margin:8px 0 0">나머지 ' + fmt(list.length - 5) + '건은 <a href="#/bills">법안 검토 목록</a>에서 볼 수 있습니다.</p>';
+    return html + "</div>";
   }
 
   // 상황판 맨 위 한 문장: 판정한 법안 가운데 대상+경계선이 가장 많은 법안 (모두 0이면 그대로 말한다)

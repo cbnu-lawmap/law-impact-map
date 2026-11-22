@@ -116,7 +116,32 @@
     return { counts: counts, reasons: reasons };
   }
 
-  var api = { judge: judge, countAll: countAll, STATUSES: STATUSES, isEmpty: isEmpty, USE_NAMES: USE_NAMES, useName: useName, structName: structName };
+  // 국회 심사 단계 (docs/review_stage.md). 본회의 통과에 가까운 단계가 앞. 종결(폐기)은 맨 뒤
+  var STAGES = [
+    "본회의 처리 완료", "법사위 처리", "법사위 상정", "법사위 회부",
+    "위원회 의결", "위원회 심사미료", "위원회 상정(심사 중)", "위원회 회부(상정 전)", "접수",
+    "대안반영폐기(종결)",
+  ];
+  // 곧 통과될 수 있는 단계: 법사위 회부 이후, 아직 진행 중
+  var NEAR_STAGES = ["법사위 처리", "법사위 상정", "법사위 회부"];
+  /** 단계 순서 번호 (작을수록 통과에 가까움). 모르는 단계는 맨 뒤. */
+  function stageRank(stage) {
+    var i = STAGES.indexOf(stage);
+    return i < 0 ? STAGES.length : i;
+  }
+  /** 곧 통과될 수 있는 법안인가 (법사위 회부 이후이고 진행 중) */
+  function isNearPass(bill) {
+    return !!bill && bill.in_progress === true && NEAR_STAGES.indexOf(bill.stage) >= 0;
+  }
+  /** 배지 모양 구분: near(법사위 이후 진행 중) · closed(종결) · 그 밖 "" */
+  function stageKind(bill) {
+    if (!bill || !bill.stage) return "";
+    if (bill.in_progress === false) return "closed";
+    return isNearPass(bill) ? "near" : "";
+  }
+
+  var api = { judge: judge, countAll: countAll, STATUSES: STATUSES, isEmpty: isEmpty, USE_NAMES: USE_NAMES, useName: useName, structName: structName,
+    STAGES: STAGES, NEAR_STAGES: NEAR_STAGES, stageRank: stageRank, isNearPass: isNearPass, stageKind: stageKind };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.Judge = api;
 })(this);
