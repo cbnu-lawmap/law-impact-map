@@ -1,0 +1,44 @@
+# 통과 예측 학습 데이터 수집 (한 번만 손으로 실행)
+# 처리 결과가 확정된 지난 국회 법안을 모아 data/bills_history_<대수>.csv 로 커밋한다.
+# 열린국회 키는 GitHub Secret ASSEMBLY_API_KEY 로만 쓴다.
+name: Collect training history
+
+on:
+  workflow_dispatch:
+    inputs:
+      age:
+        description: "국회 대수"
+        default: "21"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r collect/requirements.txt
+      - name: Collect
+        env:
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+        run: python collect/collect_history.py --age "${{ inputs.age }}"
+      - name: Commit
+        run: |
+          f="data/bills_history_${{ inputs.age }}.csv"
+          if [ ! -f "$f" ]; then echo "파일이 없음 (키 없음 또는 응답 이상)"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf input
+          git add "$f"
+          git diff --cached --quiet && { echo "바뀐 것 없음"; exit 0; }
+          git commit -m "data: 통과 예측 학습용 ${{ inputs.age }}대 법안 수집"
+          git push origin HEAD:main
