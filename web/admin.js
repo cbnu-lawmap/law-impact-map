@@ -13,15 +13,25 @@
  *   #/print/번호  검토서   #/progress  진행 현황   #/rules  판정 규칙·검증   #/sources  데이터·한계
  *
  * 로그인·서버 저장이 없다. 진행 기록은 이 브라우저(localStorage)에만 남고, 담당자끼리는 CSV로 주고받는다.
- * 질의 도우미만 별도 서버(server/api/ask.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
- * 설정에서 질의 도우미를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
+ * 질의 도우미와 검토 에이전트만 별도 서버(server/api/ask.js, agent.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
+ * 설정에서 질의 도우미(AI)를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
+ * 로컬 시험: localhost 에서 열고 ?api=http://localhost:3000 을 붙이면 그 서버에 묻는다 (server/scripts/dev-server.js).
  *
  * 화면 찍기용: 주소에 ?shot=1 을 붙이면 역할 고르기 창·둘러보기를 띄우지 않고, 아무것도 저장하지 않는다.
  */
 (function () {
   "use strict";
 
-  var ASK_URL = "https://ppaegok-api.vercel.app/api/ask";
+  var API_BASE = "https://ppaegok-api.vercel.app";
+  // 로컬 시험용: localhost 에서 연 화면만 ?api=http://localhost:포트 로 서버를 바꿀 수 있다
+  (function () {
+    var m = location.search.match(/[?&]api=([^&]+)/);
+    if (!m || !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) return;
+    var u = decodeURIComponent(m[1]).replace(/\/$/, "");
+    if (/^http:\/\/(localhost|127\.0\.0\.1):\d{2,5}$/.test(u)) API_BASE = u;
+  })();
+  var ASK_URL = API_BASE + "/api/ask";
+  var AGENT_URL = API_BASE + "/api/agent";
   var STATUSES = Judge.STATUSES; // 대상, 경계선, 비대상, 판정불가
   var PAGE = 50;
   // 진행 상태. 화면에서는 모양(빈 원·반쪽 원·마름모·꽉 찬 원)+색+글자 배지로 보인다 (admin.css .pg-*)
@@ -46,7 +56,8 @@
 
   var D = { fields: {}, bills: [], byNo: {}, demos: {}, region: "", total: 0, props: null, judged: {} };
   var ui = {
-    bills: { q: "", field: "", committee: "", status: "", pg: "", sort: "date", dir: -1, page: 0, sel: {} },
+    // 기본 정렬: 통과에 가까운 심사 단계 순 (같은 단계는 단계 날짜가 최근인 것부터)
+    bills: { q: "", field: "", committee: "", status: "", pg: "", stage: "", sort: "stage", dir: 1, page: 0, sel: {} },
     roster: { tab: "", page: 0, no: null },
   };
   var $view = document.getElementById("view");
@@ -108,6 +119,13 @@
     return '<span class="tag" title="법안 내용으로 자동 분류한 분야">' + esc(fieldName(b.field)) + ' <span class="sub">자동 분류</span></span>' +
       (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>' : "");
   }
+  // 심사 단계 배지 (법사위 이후 진행 중이면 강조, 종결이면 흐리게)
+  function stageTag(b, withDate) {
+    if (!b.stage) return '<span class="tag wait">단계 정보 없음</span>';
+    var k = Judge.stageKind(b);
+    return '<span class="tag stage' + (k ? " " + k : "") + '" title="국회 심사 단계' + (b.stage_date ? " · " + esc(b.stage_date) : "") + '">' +
+      esc(b.stage) + (withDate && b.stage_date ? ' <span class="sub">' + esc(b.stage_date) + "</span>" : "") + "</span>";
+  }
   function fieldText(b) { return fieldName(b.field) + " (자동 분류" + (lowConf(b) ? " · 분류 확인 필요" : "") + ")"; }
   function getJSON(url) {
     return fetch(url).then(function (r) {
@@ -168,6 +186,42 @@
       });
     }
     return propsPromise;
+  }
+
+  // 기준 교차 확인 (collect/crosscheck_criteria.py → data/crosscheck.json). 법안 상세·판정 규칙 화면에서만 받는다
+  var crossPromise = null;
+  function loadCross() {
+    if (!crossPromise) crossPromise = getJSON("data/crosscheck.json").catch(function () { crossPromise = null; return null; });
+    return crossPromise;
+  }
+  var XC_TAG = { "교차 확인됨": "done", "확인 필요": "check", "단일 출처": "wait" };
+  function xcChip(s) { return '<span class="tag ' + (XC_TAG[s] || "") + '">' + esc(s) + "</span>"; }
+  function xcCell(v) { return v ? esc(v) : '<span class="muted">-</span>'; }
+  var XC_NOTE = "세 출처 모두 자동 추출입니다. 교차 확인됨은 출처끼리 수치가 같다는 뜻이고, 사람이 확인했다는 뜻은 아닙니다.";
+  // 법안 1건의 출처별 기준 표 (우리 AI / 규칙 기반 / 팀원 AI)
+  function crossTable(items, withNo) {
+    return '<div class="table-wrap"><table class="dt"><thead><tr>' + (withNo ? "<th>법안</th>" : "") +
+      "<th>기준</th><th>우리 AI</th><th>규칙 기반</th><th>팀원 AI</th><th>판정</th><th>메모</th></tr></thead><tbody>" +
+      items.map(function (it) {
+        return "<tr>" + (withNo ? '<td style="white-space:nowrap"><a href="#/bill/' + esc(it.no) + '">' + esc(it.no) + "</a></td>" : "") +
+          '<td style="white-space:nowrap">' + esc(it.attr) + "</td><td>" + xcCell(it.ours) + "</td><td>" + xcCell(it.rule) + "</td><td>" +
+          xcCell(it.team) + '</td><td style="white-space:nowrap">' + xcChip(it.status) + '</td><td class="small muted">' + xcCell(it.note) + "</td></tr>";
+      }).join("") + "</tbody></table></div>";
+  }
+  function crossSection(no) {
+    return loadCross().then(function (X) {
+      var b = X && X.bills[no];
+      if (!b) return "";
+      return '<h3>기준 교차 확인 <span class="tag wait">AI 추출 · 사람 확인 전</span></h3>' +
+        '<p class="small muted" style="margin:-4px 0 8px">같은 법안의 기준을 세 출처에서 나란히 봅니다. ' + esc(XC_NOTE) + "</p>" +
+        crossTable(b.items, false);
+    });
+  }
+  function fillCross(no) {
+    crossSection(no).then(function (html) {
+      var box = document.getElementById("xc-box");
+      if (box && location.hash === "#/bill/" + no) box.innerHTML = html;
+    });
   }
 
   // 법안 1건 판정: 건물마다 결과를 계산해 둔다 (같은 법안은 한 번만)
@@ -288,6 +342,7 @@
     html += headline(judgedNos, judgedDone);
     html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
     html += newBillsCard();
+    html += nearPassCard();
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
@@ -334,6 +389,34 @@
     $view.querySelectorAll("a[data-field]").forEach(function (a) {
       a.addEventListener("click", function () { ui.bills.field = a.getAttribute("data-field"); ui.bills.page = 0; });
     });
+    var more = document.getElementById("near-more");
+    if (more) more.addEventListener("click", function () { ui.bills.stage = "near"; ui.bills.page = 0; });
+  }
+
+  // 상황판 카드: 곧 통과될 수 있는 법안 (법사위 회부 이후이고 아직 진행 중)
+  function nearPassCard() {
+    var near = D.bills.filter(Judge.isNearPass).sort(function (a, b) {
+      return Judge.stageRank(a.stage) - Judge.stageRank(b.stage) || (a.stage_date < b.stage_date ? 1 : a.stage_date > b.stage_date ? -1 : 0);
+    });
+    var stageCnt = {};
+    D.bills.forEach(function (b) { if (b.stage) stageCnt[b.stage] = (stageCnt[b.stage] || 0) + 1; });
+    var dist = Judge.STAGES.filter(function (st) { return stageCnt[st]; }).map(function (st) { return st + " " + fmt(stageCnt[st]) + "건"; }).join(" · ");
+    var html = '<div class="card near-pass" id="near-pass"><div class="near-head"><h3>곧 통과될 수 있는 법안</h3>' +
+      '<span class="near-count" id="near-count">' + fmt(near.length) + "건</span></div>" +
+      '<p class="muted small near-note">법제사법위원회(법사위)에 회부된 뒤 아직 진행 중인 법안입니다. 본회의 처리가 끝났거나 폐기된 법안은 뺍니다.</p>';
+    if (!near.length) {
+      html += '<p class="near-empty">지금은 없습니다. 법사위에 회부된 진행 중 법안이 0건입니다.</p>';
+    } else {
+      html += '<table class="dt"><tbody>' + near.slice(0, 5).map(function (b) {
+        var d = D.demos[b.no];
+        var hit = d ? '<span class="tag done">대상·경계선 ' + fmt(d.counts.대상 + d.counts.경계선) + "동</span>" : '<span class="tag wait">기준 추출 대기</span>';
+        return '<tr><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + '</a><div class="muted small">의안 ' + esc(b.no) + " · " + esc(b.committee) +
+          "</div></td><td>" + stageTag(b, true) + "</td><td>" + hit + "</td></tr>";
+      }).join("") + "</tbody></table>" +
+        (near.length > 5 ? '<p class="small near-more"><a href="#/bills" id="near-more">' + fmt(near.length) + "건 모두 보기</a></p>" : "");
+    }
+    html += '<p class="muted small near-dist">전체 심사 단계: ' + esc(dist || "정보 없음") + "</p></div>";
+    return html;
   }
 
   // 매일 자동 수집으로 최근 7일 안에 처음 들어온 법안 (bills.json 의 added)
@@ -396,6 +479,9 @@
       if (s.status === "done" && !D.demos[b.no]) return false;
       if (s.status === "wait" && D.demos[b.no]) return false;
       if (s.pg && pgOf(b.no) !== s.pg) return false;
+      if (s.stage === "near" && !Judge.isNearPass(b)) return false;
+      if (s.stage === "open" && b.in_progress !== true) return false;
+      if (s.stage && s.stage !== "near" && s.stage !== "open" && b.stage !== s.stage) return false;
       if (q && b._q.indexOf(q) < 0) return false;
       return true;
     });
@@ -410,6 +496,13 @@
       return b[key] || "";
     };
     list.sort(function (a, b) {
+      if (key === "stage") {
+        // 단계 순서(머리글을 누르면 방향이 바뀜) → 같은 단계는 단계 날짜 최근 순
+        var r = (Judge.stageRank(a.stage) - Judge.stageRank(b.stage)) * dir;
+        if (r) return r;
+        var da = a.stage_date || "", db = b.stage_date || "";
+        return (da < db ? 1 : da > db ? -1 : 0) || (a.no < b.no ? 1 : -1);
+      }
       var x = val(a), y = val(b);
       return (x < y ? -1 : x > y ? 1 : 0) * dir || (a.no < b.no ? 1 : -1);
     });
@@ -420,7 +513,10 @@
     var s = ui.bills;
     var committees = Array.from(new Set(D.bills.map(function (b) { return b.committee; }))).sort();
     var html = '<h2>법안 검토 목록</h2><p class="lead">계류 법안 ' + fmt(D.bills.length) +
-      "건. 판정한 법안은 사창동 건물 동수가 함께 나옵니다. 체크한 법안은 진행 상태를 한꺼번에 바꿀 수 있습니다.</p>";
+      "건. 기본 순서는 통과에 가까운 심사 단계 순입니다. 판정한 법안은 사창동 건물 동수가 함께 나옵니다. 체크한 법안은 진행 상태를 한꺼번에 바꿀 수 있습니다.</p>";
+    var stageCnt = {};
+    D.bills.forEach(function (b) { if (b.stage) stageCnt[b.stage] = (stageCnt[b.stage] || 0) + 1; });
+    var nearN = D.bills.filter(Judge.isNearPass).length, openN = D.bills.filter(function (b) { return b.in_progress === true; }).length;
     html += '<div class="toolbar no-print">' +
       '<input type="search" id="f-q" placeholder="법안명·번호·제안이유 검색" value="' + esc(s.q) + '">' +
       '<select id="f-field"><option value="">분야 전체</option>' + Object.keys(D.fields).map(function (k) {
@@ -434,6 +530,12 @@
       '<select id="f-pg"><option value="">진행 전체</option>' + PG_KEYS.map(function (k) {
         return '<option value="' + k + '"' + (s.pg === k ? " selected" : "") + ">" + PG[k].label + "</option>";
       }).join("") + "</select>" +
+      '<select id="f-stage" aria-label="심사 단계"><option value="">심사 단계 전체</option>' +
+      '<option value="open"' + (s.stage === "open" ? " selected" : "") + ">진행 중인 법안만 (" + fmt(openN) + ")</option>" +
+      '<option value="near"' + (s.stage === "near" ? " selected" : "") + ">곧 통과될 수 있는 법안 (" + fmt(nearN) + ")</option>" +
+      Judge.STAGES.filter(function (st) { return stageCnt[st]; }).map(function (st) {
+        return '<option value="' + esc(st) + '"' + (s.stage === st ? " selected" : "") + ">" + esc(st) + " (" + fmt(stageCnt[st]) + ")</option>";
+      }).join("") + "</select>" +
       '<span class="spacer"></span><span class="muted small" id="f-count"></span>' +
       '<button type="button" class="btn ghost" id="f-csv">CSV 내려받기</button></div>' +
       '<div class="toolbar no-print bulk" id="bulk"></div>' +
@@ -445,15 +547,15 @@
       clearTimeout(debounce);
       debounce = setTimeout(function () { s.q = e.target.value; s.page = 0; drawBillTable(); }, 150);
     });
-    [["f-field", "field"], ["f-com", "committee"], ["f-status", "status"], ["f-pg", "pg"]].forEach(function (p) {
+    [["f-field", "field"], ["f-com", "committee"], ["f-status", "status"], ["f-pg", "pg"], ["f-stage", "stage"]].forEach(function (p) {
       document.getElementById(p[0]).addEventListener("change", function (e) { s[p[1]] = e.target.value; s.page = 0; drawBillTable(); });
     });
     document.getElementById("f-csv").addEventListener("click", function () {
       downloadCSV("빼곡_법안검토목록_" + stamp() + ".csv",
-        ["의안번호", "법안명", "소관위원회", "제안일", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
+        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
-          return [b.no, b.name, b.committee, b.date, fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
+          return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
             .concat([PG[pgOf(b.no)].label, b.link]);
         }));
@@ -492,7 +594,7 @@
     var allOn = rows.length && rows.every(function (b) { return s.sel[b.no]; });
     var html = '<table class="dt"><thead><tr><th class="chk no-print"><input type="checkbox" id="sel-all"' + (allOn ? " checked" : "") +
       ' aria-label="이 쪽 모두 선택"></th>' + th("no", "의안번호") + th("name", "법안명") + th("committee", "위원회") +
-      th("date", "제안일") + th("field", "분야") + th("impact", "사창동 영향") + th("pg", "진행") + "</tr></thead><tbody>";
+      th("date", "제안일") + th("stage", "심사 단계") + th("field", "분야") + th("impact", "사창동 영향") + th("pg", "진행") + "</tr></thead><tbody>";
     html += rows.map(function (b) {
       var d = D.demos[b.no];
       var impact = d
@@ -501,9 +603,9 @@
         : '<span class="tag wait">기준 추출 대기</span>';
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
-        '</td><td class="num">' + esc(b.date) + "</td><td>" + esc(fieldName(b.field)) +
+        '</td><td class="num">' + esc(b.date) + "</td><td>" + stageTag(b, true) + "</td><td>" + esc(fieldName(b.field)) +
         (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + "</td><td>" + pgMark(b.no) + "</td></tr>";
-    }).join("") || '<tr><td colspan="8" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
     html += "</tbody></table>" + pager(s.page, pages, list.length);
     var box = document.getElementById("bill-table");
     box.innerHTML = html;
@@ -548,7 +650,7 @@
   function billHead(b) {
     return '<div class="crumb no-print"><a href="#/bills">← 법안 검토 목록</a></div>' +
       "<h2>" + esc(b.name) + '</h2><p class="lead">의안번호 ' + esc(b.no) + " · " + esc(b.committee) + " · 제안 " + esc(b.date) +
-      " · " + fieldTag(b) + " · " + pgMark(b.no) +
+      " · " + stageTag(b, true) + " · " + fieldTag(b) + " · " + pgMark(b.no) +
       (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>";
   }
   function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }
@@ -603,15 +705,19 @@
     var links = '<div class="toolbar no-print"><a class="btn ghost" href="index.html?bill=' + no + '">지도에서 보기</a>' +
       '<a class="btn ghost" href="' + esc(b.link) + '" target="_blank" rel="noopener">의안정보시스템 원문</a>' +
       '<button type="button" class="btn ghost ai-only" id="ask-this">이 법안 질문하기</button>' +
+      '<button type="button" class="btn ghost ai-only" id="agent-run">에이전트로 검토 초안 만들기</button>' +
       (demo ? '<a class="btn" href="#/print/' + no + '">검토서 인쇄·한글</a>' : "") + "</div>";
 
     if (!demo) {
-      $view.innerHTML = billHead(b) + links + progressBox(no) +
+      $view.innerHTML = billHead(b) + links + agentBox(no) + progressBox(no) +
         '<div class="note-box">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않아 건물 판정이 없습니다. ' +
         "AI 기준 추출 단계에서 판정할 예정입니다.</div>" +
-        '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>";
+        '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>" +
+        '<div id="xc-box"></div>';
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      bindAgent(no);
+      fillCross(no);
       return;
     }
 
@@ -620,7 +726,7 @@
       if (location.hash !== "#/bill/" + no) return; // 그사이 다른 화면으로 옮김
       var J = judgeBill(no);
       var cs = checkStats(no);
-      var html = billHead(b) + links + progressBox(no);
+      var html = billHead(b) + links + agentBox(no) + progressBox(no);
       html += '<div class="counts">' + STATUSES.map(function (s) {
         return '<div class="c"><div class="k"><i class="s-' + s + '"></i>' + s + '</div><div class="v">' + fmt(J.counts[s]) +
           '동</div><div class="p">' + pct(J.counts[s], D.total) + "</div></div>";
@@ -638,6 +744,7 @@
       html += '<div class="card"><h3 style="margin-top:0">결론과 사유별 동수</h3><p style="margin:0 0 10px">' + esc(demo.conclusion) + "</p>" +
         reasonTable(J) + "</div>";
       html += "</div>";
+      html += '<div id="xc-box"></div>';
 
       html += "<h3>건물 명부</h3>";
       html += '<p class="small muted" style="margin:-4px 0 8px">확인 결과를 기록하면 적중률이 나옵니다 (온지붕 현장 확인 방식). ' +
@@ -655,6 +762,8 @@
       drawRoster(no);
       bindProgressBox(no, rerender);
       bindAskThis(no);
+      bindAgent(no);
+      fillCross(no);
       document.getElementById("r-csv").addEventListener("click", function () {
         var rows = J.rows.filter(function (r) { return r.status === ui.roster.tab; });
         var c = checks[no] || {};
@@ -934,7 +1043,29 @@
       card("V-03", "분야 자동 분류 확신도", "참고", "확신도 0.9 이상 " + fmt(hi) + "건 · 0.6 미만 " + fmt(lo) + "건 (전체 " + fmt(D.bills.length) + "건). 낮은 법안은 분야 필터에서 빠지거나 잘못 들어갈 수 있음") +
       card("V-04", "기준 추출", "보류", "판정한 법안 " + judgedNos.length + "건 — " + methodSummary() + ". AI 추출 건은 원문 문구·수치를 자동 대조했지만 담당자 검토 전. 나머지 " + fmt(D.bills.length - judgedNos.length) + "건은 AI 추출(원문 수치 자동 대조) 단계에서 판정 예정") +
       card("V-05", "질의 도우미 답의 숫자", "채택", "서버가 답에 나온 숫자를 근거 자료와 대조해, 근거에 없는 숫자는 경고로 표시");
+    html += '<div id="xc-rules"><p class="muted small">기준 교차 확인을 불러오는 중…</p></div>';
     $view.innerHTML = html;
+    loadCross().then(function (X) {
+      var box = document.getElementById("xc-rules");
+      if (!box || location.hash !== "#/rules") return;
+      if (!X) { box.innerHTML = '<p class="muted small">기준 교차 확인 자료(data/crosscheck.json)를 불러오지 못했습니다.</p>'; return; }
+      var items = [], allOk = 0, someOk = 0;
+      judgedNos.forEach(function (no) {
+        var b = X.bills[no];
+        var mine = b ? b.items.filter(function (it) { return it.ours; }) : [];
+        var ok = mine.filter(function (it) { return it.status === "교차 확인됨"; }).length;
+        if (mine.length && ok === mine.length) allOk++;
+        else if (ok) someOk++;
+        mine.forEach(function (it) { items.push(Object.assign({ no: no }, it)); });
+      });
+      var sum = X.statuses.map(function (s) { return s + " " + fmt(X.summary[s] || 0) + "건"; }).join(" · ");
+      box.innerHTML = card("V-06", "기준 교차 확인", "참고",
+        "우리 AI 추출 · 규칙 기반(criteria_rule.csv) · 팀원 AI 추출(PR #20, 미검토)을 법안 × 기준 종류마다 비교. " +
+        "출처 중 하나라도 있는 법안 " + fmt(Object.keys(X.bills).length) + "건, " + sum + ".<br>" +
+        "판정한 " + judgedNos.length + "건 중 기준 전부 교차 확인됨 " + allOk + "건 · 일부만 " + someOk + "건. " + esc(XC_NOTE)) +
+        '<p class="small muted" style="margin:0 0 8px">판정한 법안의 기준만 보입니다 <span class="tag wait">AI 추출 · 사람 확인 전</span></p>' +
+        crossTable(items, true);
+    });
   }
 
   // ---------------------------------------------------------------- 화면: 데이터·한계
@@ -1184,6 +1315,100 @@
     fetch(ASK_URL).then(function (r) { return r.json(); }).then(function (j) {
       el.innerHTML = '<i class="dot ' + (j.ok ? "ok" : "bad") + '"></i>질의 도우미 ' + (j.ok ? "연결됨" : "키 없음");
     }).catch(function () { el.innerHTML = '<i class="dot bad"></i>질의 도우미 연결 안 됨'; });
+  }
+
+  // ---------------------------------------------------------------- 검토 에이전트 (AI, 별도 서버 /api/agent)
+  // 서버의 AI 가 도구(법안 읽기, 기준 뽑기, 출처 비교, 건물 판정, 초안 쓰기)를 골라 부른 순서와 이유, 결과, 초안을 보인다.
+  var agentState = {}; // 번호 -> { busy } | { result } | { error }  (화면을 다시 그려도 남게)
+  var AGENT_TOOLS = ["법안 정보 읽기", "적용 기준 뽑기", "출처별 기준 비교", "건물 판정 집계", "검토 초안 쓰기"];
+  function agentBox(no) {
+    return '<div class="ai-only no-print" id="agent-box" aria-live="polite">' + agentHtml(no) + "</div>";
+  }
+  function agentHead(j) {
+    return '<div class="agent-head"><h3>검토 초안 (에이전트)</h3><span class="tag check">사람 확인 필요 · AI 초안</span>' +
+      '<span class="tag wait">추정 · 사람 확인 전</span>' + (j && j.cached ? '<span class="tag wait">10분 안에 만든 결과 다시 보기</span>' : "") + "</div>";
+  }
+  function agentHtml(no) {
+    var st = agentState[no];
+    if (!st) return "";
+    if (st.busy) {
+      return '<div class="card agent-card">' + agentHead() +
+        '<p class="muted small" style="margin:6px 0">에이전트가 도구를 골라 부르며 검토하는 중입니다. 보통 10초에서 30초쯤 걸립니다 (최대 8단계).</p>' +
+        '<ol class="agent-steps">' + AGENT_TOOLS.map(function (t) {
+          return '<li class="wait"><b>' + esc(t) + '</b> <span class="muted small">순서는 에이전트가 정합니다</span></li>';
+        }).join("") + "</ol></div>";
+    }
+    if (st.error) {
+      return '<div class="card agent-card">' + agentHead() + '<div class="note-box">검토 초안을 만들지 못했습니다: ' + esc(st.error) + "</div></div>";
+    }
+    var j = st.result;
+    if (j.fixed) return '<div class="card agent-card">' + agentHead() + '<div class="note-box">' + esc(j.answer) + "</div></div>";
+    var html = '<div class="card agent-card">' + agentHead(j);
+    html += '<p class="small muted" style="margin:6px 0 10px">AI 가 고른 순서대로 적었습니다. 판정은 건축물 데이터로 추정한 결과이며 법률 판단이 아닙니다. 담당자가 원문과 대조한 뒤에 쓰세요.</p>';
+    html += '<ol class="agent-steps">' + (j.steps || []).map(function (s) {
+      return "<li" + (s.ok ? "" : ' class="bad"') + "><b>" + esc(s.tool_ko || s.tool) + "</b>" +
+        '<div class="small"><span class="muted">고른 이유</span> ' + esc(s.why) + "</div>" +
+        '<div class="small"><span class="muted">결과</span> ' + esc(s.summary) + "</div></li>";
+    }).join("") + "</ol>";
+    if (j.limits && j.limits.stopped) html += '<p class="small agent-warn">' + esc(j.limits.stopped) + ". 결과가 덜 모였을 수 있습니다.</p>";
+    html += '<div class="field-label">초안</div><div class="quote agent-draft">' + esc(j.draft) + "</div>";
+    if (j.unverified && j.unverified.length) html += '<p class="small agent-warn">근거 자료에 없는 숫자: ' + esc(j.unverified.join(", ")) + ". 직접 확인하세요.</p>";
+    if (j.counts) {
+      html += '<div class="field-label">건물 판정 (' + esc(j.region) + " " + fmt(j.total) + "동, " + esc(j.rule_source || "") + ")</div>" +
+        '<ul class="agent-counts">' + STATUSES.map(function (s) {
+          return '<li><i class="sw s-' + s + '" aria-hidden="true"></i>' + s + " <b>" + fmt(j.counts[s]) + "동</b></li>";
+        }).join("") + "</ul>";
+      if (j.rule) html += '<div class="small muted">적용 규칙: ' + esc(ruleText(j.rule).join(" · ")) + "</div>";
+    } else {
+      html += '<p class="small muted">근거가 확인된 기준이 없어 건물 판정은 하지 않았습니다.</p>';
+    }
+    var xc = j.crosscheck;
+    if (xc) {
+      html += '<div class="field-label" style="margin-top:10px">출처별 기준 비교</div><p class="small" style="margin:4px 0">' + esc(xc.summary) + "</p>";
+      if (xc.found && xc.compare && xc.compare.length) {
+        html += '<div class="table-wrap"><table class="dt"><thead><tr><th>기준</th><th>에이전트</th><th>우리 AI</th><th>규칙 기반</th><th>판정</th></tr></thead><tbody>' +
+          xc.compare.map(function (c) {
+            return "<tr><td>" + esc(c.attr) + "</td><td>" + xcCell(c.agent) + "</td><td>" + xcCell(c.ours) + "</td><td>" + xcCell(c.rule) +
+              '</td><td style="white-space:nowrap">' + xcChip(c.status) + "</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }
+    }
+    html += '<div class="toolbar" style="margin:10px 0 0"><span class="muted small">모델 ' + esc(j.model) + (j.tokens != null ? " · 토큰 " + fmt(j.tokens) : "") +
+      '</span><span class="spacer"></span><button type="button" class="btn ghost" id="agent-again">다시 만들기</button></div>';
+    return html + "</div>";
+  }
+  function drawAgent(no) {
+    var box = document.getElementById("agent-box");
+    if (box && location.hash === "#/bill/" + no) { box.innerHTML = agentHtml(no); bindAgentAgain(no); }
+  }
+  function bindAgentAgain(no) {
+    var again = document.getElementById("agent-again");
+    if (again) again.addEventListener("click", function () { runAgent(no); });
+  }
+  function bindAgent(no) {
+    var b = document.getElementById("agent-run");
+    if (b) b.addEventListener("click", function () { runAgent(no); });
+    bindAgentAgain(no);
+  }
+  function runAgent(no) {
+    if (!prefs.ai) return; // 꺼져 있으면 서버에 묻지 않는다
+    if (agentState[no] && agentState[no].busy) return;
+    agentState[no] = { busy: true };
+    var btn = document.getElementById("agent-run");
+    if (btn) btn.disabled = true;
+    drawAgent(no);
+    fetch(AGENT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill: no }) })
+      .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || "서버 응답 " + r.status); return j; }); })
+      .then(function (j) { agentState[no] = { result: j }; })
+      .catch(function (e) {
+        var msg = e && e.message === "Failed to fetch" ? "서버에 연결하지 못했습니다" : (e && e.message) || "알 수 없는 오류";
+        agentState[no] = { error: msg };
+      })
+      .then(function () {
+        var b2 = document.getElementById("agent-run");
+        if (b2) b2.disabled = false;
+        drawAgent(no);
+      });
   }
 
   // ---------------------------------------------------------------- 라우터

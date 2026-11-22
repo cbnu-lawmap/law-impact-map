@@ -4,7 +4,7 @@
 
   web/data/buildings.geojson  사창동 건물 (판정용 속성 6개만, 좌표 소수 6자리)
   web/data/boundary.geojson   사창동 행정동 경계
-  web/data/bills.json         법안 목록 (bills_summary + bills_field_pred, BILL_NO 기준)
+  web/data/bills.json         법안 목록 (bills_summary + bills_field_pred + bills_stage, BILL_NO 기준)
   web/data/demo_rules.json    판정 시범(사람 추출 2건 + AI 추출·원문 대조) 규칙과 결과 동수
 
 개인정보 보호: 건물명(bld_nm), 동명(dong_nm) 등 이름이 섞일 수 있는 필드는 넣지 않는다.
@@ -452,6 +452,9 @@ def main():
     # 3) 법안
     with open(os.path.join(DATA, "bills_field_pred.csv"), encoding="utf-8-sig") as f:
         pred = {r["BILL_NO"]: r for r in csv.DictReader(f)}
+    # 심사 단계 (docs/review_stage.md). 없는 법안은 stage 를 비워 둔다.
+    with open(os.path.join(DATA, "bills_stage.csv"), encoding="utf-8-sig") as f:
+        stage = {r["BILL_NO"]: r for r in csv.DictReader(f)}
     bills = []
     summaries = {}
     with open(os.path.join(DATA, "bills_summary.csv"), encoding="utf-8-sig") as f:
@@ -470,9 +473,14 @@ def main():
                 "conf": round(float(pr["CONF"]), 3) if pr.get("CONF") else None,
                 "summary": s[:SUMMARY_LEN] + ("…" if len(s) > SUMMARY_LEN else ""),
                 "link": r["DETAIL_LINK"],
+                "stage": stage.get(r["BILL_NO"], {}).get("STAGE") or None,
+                "stage_date": stage.get(r["BILL_NO"], {}).get("STAGE_DATE") or None,
+                "in_progress": (stage[r["BILL_NO"]]["IN_PROGRESS"] == "Y"
+                                if r["BILL_NO"] in stage else None),
             })
     bills.sort(key=lambda b: (b["date"], b["no"]), reverse=True)
     mark_added(bills)
+    print("  심사 단계:", dict(Counter(b["stage"] for b in bills)))
     dump({"fields": FIELD_NAMES, "bills": bills}, "bills.json")
 
     # 4) 판정 시범

@@ -246,6 +246,20 @@ table.dt { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .tag.wait { color: var(--muted); background: var(--bg); }
 .tag.check { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); font-weight: 600; }
 .tag .sub { color: var(--muted); }
+/* 심사 단계: 법사위 이후 진행 중은 강조, 종결(폐기 등)은 점선으로 흐리게 */
+.tag.stage { background: var(--bg); }
+.tag.stage.near { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }
+.tag.stage.closed { border-style: dashed; color: var(--muted); }
+
+/* 상황판: 곧 통과될 수 있는 법안 */
+.near-pass { margin-top: 16px; }
+.near-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.near-head h3 { margin: 0; }
+.near-count { font-size: var(--fs-2xl); font-weight: 750; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.near-note { margin: 4px 0 10px; }
+.near-empty { margin: 0; }
+.near-more { margin: 8px 0 0; }
+.near-dist { margin: 10px 0 0; }
 
 /* 판정 막대 */
 .sbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-2); min-width: 120px; margin-top: 6px; }
@@ -340,6 +354,22 @@ select.check { font: inherit; font-size: var(--fs-xs); padding: 3px 6px; border:
 body:not(.audit) .audit-only { display: none !important; }
 body.audit .work-only { display: none !important; }
 body.no-ai .ai-only { display: none !important; }
+
+/* ---------------------------------------------------------------- 검토 에이전트 (법안 상세) */
+.agent-card { margin-bottom: 16px; border-color: var(--warn-line); }
+.agent-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.agent-head h3 { margin: 0; }
+.agent-steps { margin: 4px 0 12px; padding-left: 22px; font-size: var(--fs-sm); }
+.agent-steps li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.agent-steps li:last-child { border-bottom: 0; }
+.agent-steps li > div { margin-top: 2px; color: var(--ink-2); }
+.agent-steps li .muted { display: inline-block; min-width: 56px; }
+.agent-steps li.wait b { color: var(--muted); font-weight: 600; }
+.agent-steps li.bad b { color: var(--warn); }
+.agent-draft { white-space: pre-wrap; line-height: 1.7; }
+.agent-warn { color: var(--warn); }
+.agent-counts { list-style: none; display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 4px 0 6px; padding: 0; font-size: var(--fs-sm); }
+.agent-counts b { font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- 하단 상태 바 (얇고 조용하게) */
 .status {

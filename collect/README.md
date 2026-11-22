@@ -54,5 +54,8 @@ ASSEMBLY_API_KEY=발급받은키
 | --- | --- |
 | `python collect/add_review_stage.py <bills_raw.csv 경로>` | 법안별 심사 단계 → `data/bills_stage.csv` (PR #17) |
 | `python collect/extract_criteria.py` | 숫자 기준 문장 추출 → `data/criteria_rule.csv` (PR #18) |
+| `python collect/crosscheck_criteria.py` | 기준 교차 확인(우리 AI · 규칙 기반 · 팀원 AI) → `data/criteria_crosscheck.csv`, `web/data/crosscheck.json`. `--candidates` 를 붙이면 노후(경과연수) 후보 동수 표도 출력 |
+
+`crosscheck_criteria.py` 는 `web/data/demo_rules.json`(먼저 `build_web_data.py` 실행), `data/criteria_rule.csv`, 팀원 AI 추출 `data/ai_feature_extraction.csv` 를 읽습니다. 팀원 파일이 저장소에 없으면 `git fetch origin` 뒤 `origin/feature/ai-feature-extraction` 브랜치에서 읽고, 다른 곳에 있으면 `--team 경로` 로 지정합니다. 교차 확인됨은 출처끼리 수치가 같다는 뜻이고 사람이 확인했다는 뜻이 아닙니다.
 
 위 두 스크립트는 각 PR이 머지된 뒤에 사용할 수 있습니다.
