@@ -13,6 +13,8 @@ CSV 데이터 보관 폴더
 | `cheongju_emd.geojson` | 바람의 지도 프로젝트에서 복사 (원 출처 확인 필요) | 2026-10-31 복사 | 청주 행정동 43개 경계 |
 | `cheongju_buildings_footprint.geojson` | 출처 확인 필요 | 2026-10-31 복사 | 13,166동, 높이(`h`)만. 청주 전체가 아님 (사창동 경계 안 150동) |
 
+`bills_process_21.csv` / `bills_process_22.csv`: 열린국회 API로 모은 법안별 심사 경과·공동발의 특징 (`collect/collect_process.py`, Actions `Collect bill process`로 수집). 열: 공동발의 인원(`COSPONSOR_N`), 제안일에 대표발의 의원이 소관 위원회 위원인지(`REP_IN_CMT`), 공동발의 의원 중 소관 위원회 위원 수·비율, 회부·상정·위원회 처리일과 제안일로부터 일수(`DAYS_TO_REFER`, `DAYS_TO_PRESENT`), 상정 여부(`PRESENTED`, `PRESENTED_90D`), 대안반영 여부(`ALT_REFLECTED`, 설명용, 정답과 이어져 특징으로 쓰지 않음). 의원 이름·정당은 없다.
+
 점검 결과는 [docs/data_check.md](../docs/data_check.md) 참고.
 
 웹 시제품용 경량 데이터는 `collect/build_web_data.py`로 `web/data/`에 생성한다 (건물명 등 이름 필드 제외, `cheongju_buildings_footprint.geojson`은 출처 불명이라 사용하지 않음).
