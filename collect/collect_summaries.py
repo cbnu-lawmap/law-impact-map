@@ -37,7 +37,7 @@ for i, r in enumerate(cands, 1):
         body = requests.get(URL, params=params, timeout=30).json()
         if "BPMBILLSUMMARY" in body:
             rowlist = body["BPMBILLSUMMARY"][1]["row"]
-            summary = rowlist[0].get("SUMMARY", "") if rowlist else ""
+            summary = (rowlist[0].get("SUMMARY") or "") if rowlist else ""  # API 가 null 을 주는 법안이 있음
     except Exception as e:
         fail.append(r["BILL_NO"])
     if not summary:
