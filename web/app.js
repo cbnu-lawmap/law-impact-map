@@ -296,12 +296,14 @@
     ];
     // 속성이 빈 건물: 신경망 추정 구간 (notebooks/building_imputation.ipynb). 판정에는 쓰지 않음
     // [속성, 구간 이름 키, 확률 키, 카드 이름, 넣을 자리(그 속성 줄 바로 아래)]
-    [["useapr_day", "est_year", "est_year_p", "추정 사용승인 연대", 4],
-     ["grnd_flr", "est_flr", "est_p", "추정 지상층수", 3],
-     ["totalarea", "est_area", "est_area_p", "추정 연면적", 2]].forEach(function (e) {
+    // 방법(est_*_m)은 노트북이 대상마다 더 잘 맞는 쪽으로 고름: 신경망 또는 이웃 8동 다수결
+    [["useapr_day", "est_year", "est_year_p", "추정 사용승인 연대", 4, "est_year_m"],
+     ["grnd_flr", "est_flr", "est_p", "추정 지상층수", 3, "est_flr_m"],
+     ["totalarea", "est_area", "est_area_p", "추정 연면적", 2, "est_area_m"]].forEach(function (e) {
       if (!Judge.isEmpty(p[e[0]]) || Judge.isEmpty(p[e[1]])) return;
+      var how = p[e[5]] === "이웃 8동 다수결" ? "이웃 8동 다수결" : "신경망 추정";
       rows.splice(e[4], 0, [e[3], esc(p[e[1]]) +
-        ' <span class="muted">(신경망 추정' + (p[e[2]] ? " " + Math.round(p[e[2]] * 100) + "%" : "") +
+        ' <span class="muted">(' + how + (p[e[2]] ? " " + Math.round(p[e[2]] * 100) + "%" : "") +
         ", 참고용 · 판정에 쓰지 않음)</span>"]);
     });
     var html = '<div class="bcard"><h4>건물 속성</h4><table>' +
