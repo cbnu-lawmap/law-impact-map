@@ -40,7 +40,7 @@
 | 건물 판정 | 규칙 × 건물 속성 → **대상 / 경계선 / 비대상 / 판정불가** |
 | 지도 시각화 | 법안 선택 시 대상 건물 채색, 건물 클릭 시 속성과 판정 사유 |
 | 행정 화면 | 담당 공무원용 상황판, 법안 검토 목록(심사 단계 포함), 진행 관리, 검토서 인쇄·한글(HWPX) |
-| 질의 도우미 | 공개 법안 자료만 근거로 답하는 AI 질의 (`server/api/ask.js`) |
+| 질의 도우미 | 13주차 검색 증강 생성(RAG): 관련 법안을 찾아 그 내용만 근거로 답하는 AI 질의 (`server/api/ask.js`) |
 | 검토 에이전트 | AI가 도구를 골라 법안 조회 → 기준 추출 → 교차 확인 → 건물 판정 → 검토서 초안까지 진행 (`server/api/agent.js`, 사람 확인 필요) |
 
 <br />
@@ -119,19 +119,32 @@ law-impact-map/
 └─ .github/workflows/  # pages.yml(배포), daily-collect.yml(매일 새 법안 수집)
 ```
 
-예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 법안 검색은 벡터 검색(RAG)이 아니라 법안명·요약문 단어 일치로 고릅니다.
+예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 지금은 법안명·요약문 단어 일치이며 벡터 임베딩은 쓰지 않음) 찾은 법안 내용만 근거로 답을 생성합니다.
 
 <br />
 
 ## 🧠 AI·학습 모델
 
-팀이 직접 학습한 모델 세 개가 중심입니다. 모두 Keras `Sequential` + `Dense` 구조이고, 노트북은 Colab에서 처음부터 끝까지 그대로 실행됩니다(데이터는 GitHub raw에서 읽음). 저장소에 올린 노트북에는 실행 결과(그래프·숫자)가 남아 있습니다.
+**강의계획서와 맞춘 곳** (「인공지능 프로그래밍」 2026-2)
 
-| 노트북 | 문제 | 데이터 | 기준선 | 신경망 | 화면에 쓰이는 곳 | Colab |
-| :--- | :--- | :--- | :--- | :--- | :--- | :---: |
-| [분야 분류](notebooks/field_classifier.ipynb) | 법안 제안이유 → 9개 분야 | 사람이 붙인 라벨 298건 | 규칙(법률명) 0.757, 로지스틱 회귀 0.808 (10회 평균 정확도) | Dense 128 → Softmax 9, **0.788 ± 0.043** | 지도·행정 화면 분야 필터, 에이전트 `classify_field`. 검증(10회 평균)이 높은 **로지스틱 회귀**를 화면에 씀. 확신도 0.50 미만 "분류 확인 필요" (10회 검증 예측에서 이 구간 정확도 0.487, 나머지 0.886) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_classifier.ipynb) |
-| [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 + 공동발의·제안일 위원회 소속(제안 시점 정보) | 다수 클래스 정확도 0.642, 로지스틱 회귀 AUC 0.722 | Dense 16 → Sigmoid, **AUC 0.718**, F1 0.56 (시간 분리 AUC 0.662, 공동발의 정보 넣기 전 0.625) | 행정 화면 법안 상세·목록 "통과 가능성 높음/보통/낮음" (시간 분리 시험에서 정한 구간, 구간별 실제 반영률 5% / 10% / 22%), 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
-| [건물 빈칸 추정](notebooks/building_imputation.ipynb) | 판정불가 원인 속성이 빈 건물의 연면적(4구간)·사용승인 연대(4구간)·지상층수(5구간) | 사창동에서 그 속성이 있는 건물 (연면적 2,112동, 사용승인 2,118동, 층수 2,108동) | 로지스틱 회귀 연면적 0.683·층수 0.521, 이웃 8동 다수결 사용승인 0.578 | 대상마다 Dense 64-32 → Softmax, 연면적 **0.693**, 사용승인 연대 **0.552** (이웃 다수결 0.578 보다 낮아 화면에는 이웃 다수결을 씀), 지상층수 **0.557** | 지도 건물 카드 "추정 연면적·사용승인 연대·지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
+| 주차 | 수업 내용 | 이 프로젝트에서 |
+| :---: | :--- | :--- |
+| 1주차 | 인공지능 개념 (규칙 기반 AI와 학습하는 AI) | 규칙 기반 기준선(법률명 → 분야, 이웃 다수결), 규칙 기반 기준 추출(`collect/extract_criteria.py`) |
+| 3주차 | 딥러닝 개념, 인공신경망 | 세 노트북의 Keras `Sequential` + `Dense` 신경망 |
+| 4주차 | 플레이그라운드 텐서플로 (은닉층·과적합 체험) | 노트북마다 은닉층 실험, 과적합 확인(학습 vs 테스트, early stopping) |
+| 9주차 | 숫자 인식 (Dense 분류, 정확도·오답 분석) | 분야 분류를 숫자 인식과 같은 구조로 (784픽셀 → TF-IDF 3,000, 10개 → 9개 분야), 혼동행렬·오답 분석 |
+| 10주차 | 전염병 예측 (RNN, 시계열) | 발의량 예측: 10주차와 같은 순서(정규화 → 과거 n주 입력 → SimpleRNN + Dense(1) → RMSE → 실제·예측 그래프) |
+| 12주차 | 생성형 AI와 로컬 LLM | 로컬 LLM 비교 노트북, 에이전트 모델 공급자 환경변수(`AGENT_LLM_BASE_URL`) |
+| 13주차 | 검색 증강 생성(RAG) | 질의 도우미(`server/api/ask.js`): 질문과 관련된 법안을 먼저 찾고 그 내용만 근거로 답을 생성 |
+
+팀이 직접 학습한 모델 네 개가 중심입니다. 분야 분류·통과 예측·건물 빈칸 추정은 Keras `Sequential` + `Dense`, 발의량 예측은 10주차와 같은 `SimpleRNN` 구조이고, 노트북은 Colab에서 처음부터 끝까지 그대로 실행됩니다(데이터는 GitHub raw에서 읽음). 저장소에 올린 노트북에는 실행 결과(그래프·숫자)가 남아 있습니다.
+
+| 강의 주차 | 노트북 | 문제 | 데이터 | 기준선 | 신경망 | 화면에 쓰이는 곳 | Colab |
+| :---: | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
+| 1·3·4·9주차 | [분야 분류](notebooks/field_classifier.ipynb) | 법안 제안이유 → 9개 분야 | 사람이 붙인 라벨 298건 | 규칙(법률명) 0.757, 로지스틱 회귀 0.808 (10회 평균 정확도) | Dense 128 → Softmax 9, **0.788 ± 0.043** | 지도·행정 화면 분야 필터, 에이전트 `classify_field`. 검증(10회 평균)이 높은 **로지스틱 회귀**를 화면에 씀. 확신도 0.50 미만 "분류 확인 필요" (10회 검증 예측에서 이 구간 정확도 0.487, 나머지 0.886) | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_classifier.ipynb) |
+| 1·3·4·9주차 | [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 + 공동발의·제안일 위원회 소속(제안 시점 정보) | 다수 클래스 정확도 0.642, 로지스틱 회귀 AUC 0.722 | Dense 16 → Sigmoid, **AUC 0.718**, F1 0.56 (시간 분리 AUC 0.662, 공동발의 정보 넣기 전 0.625) | 행정 화면 법안 상세·목록 "통과 가능성 높음/보통/낮음" (시간 분리 시험에서 정한 구간, 구간별 실제 반영률 5% / 10% / 22%), 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
+| 1·3·4·9주차 | [건물 빈칸 추정](notebooks/building_imputation.ipynb) | 판정불가 원인 속성이 빈 건물의 연면적(4구간)·사용승인 연대(4구간)·지상층수(5구간) | 사창동에서 그 속성이 있는 건물 (연면적 2,112동, 사용승인 2,118동, 층수 2,108동) | 로지스틱 회귀 연면적 0.683·층수 0.521, 이웃 8동 다수결 사용승인 0.578 | 대상마다 Dense 64-32 → Softmax, 연면적 **0.693**, 사용승인 연대 **0.552** (이웃 다수결 0.578 보다 낮아 화면에는 이웃 다수결을 씀), 지상층수 **0.557** | 지도 건물 카드 "추정 연면적·사용승인 연대·지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
+| 10주차 | [발의량 예측](notebooks/bill_volume_rnn.ipynb) | 다음 주 국토교통위원회 의원 발의 법안 수 | 21·22대 의원 발의 주별 발의량 338주 | 지난주 값, 4주 이동평균 (RMSE) | 10주차 실습과 같은 SimpleRNN(3) → Dense(1), MinMaxScaler, 과거 n주 입력 (n 4·8·12 실험, LSTM 비교) | 행정 화면 상황판 "다음 주 예상 발의량 (예측·참고용)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/bill_volume_rnn.ipynb) |
 
 - 노트북마다 같은 순서입니다: 문제 → 데이터 → 전처리 → 학습/테스트 분리 → 기준선 → 신경망 → 과적합 확인 → 은닉층 실험 → 오답 분석 → 결과표 → 화면에 쓰이는 곳.
 - **화면에는 검증에서 더 잘 맞는 방법을 씁니다.** 분야 분류는 로지스틱 회귀, 사용승인 연대 추정은 이웃 8동 다수결, 나머지는 신경망입니다. 신경망과의 비교는 노트북에 그대로 남깁니다.
@@ -140,6 +153,21 @@ law-impact-map/
 - 학습한 가중치는 `web/data/models/`로 내보내고, 서버(`server/lib/nn.js`)가 TensorFlow 없이 같은 계산을 합니다. `node server/test/nn.js`가 노트북 예측(Keras 또는 로지스틱 회귀 `predict_proba`)과 서버 계산이 같은지 확인합니다.
 - 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다.
 - 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다. 공동발의 인원과 제안일에 소관 위원회 위원이었는지(숫자·0/1)는 `collect-process.yml`이 모은 `data/bills_process_21.csv`·`_22.csv`에서 가져옵니다. 위원회 상정처럼 제안 뒤에 생기는 정보는 노트북에서 비교만 하고 화면에는 쓰지 않습니다.
+
+### 로컬 LLM 비교 ([notebooks/local_llm_extraction.ipynb](notebooks/local_llm_extraction.ipynb)) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/local_llm_extraction.ipynb)
+
+**왜 로컬 LLM인가**: 지자체 업무망은 인터넷과 분리(망분리)돼 외부 AI API를 못 쓰는 경우가 많고, 모델을 기관 안에 두면 법안 원문·검토 메모가 외부로 나가지 않으며, 호출마다 드는 API 비용도 없습니다.
+노트북은 공개 모델 **Qwen2.5-1.5B-Instruct**(Apache-2.0)를 Hugging Face transformers로 CPU에서 돌려, 에이전트와 **같은 지시문·같은 원문 대조 규칙**으로 시범 법안 26건의 적용 기준을 뽑고 OpenAI gpt-4o-mini와 비교합니다. 파이썬으로 옮긴 원문 대조는 서버 `verify()` 결과를 담은 시험 사례(`data/verify_cases.json`, `server/scripts/verify-cases.js`)와 모두 같은지 먼저 확인합니다.
+
+| 시범 법안 26건 (같은 지시문·같은 원문 대조) | 로컬 Qwen2.5-1.5B-Instruct (CPU 4스레드) | OpenAI gpt-4o-mini (배포된 에이전트, 2026-11-23 수집) |
+| :--- | :---: | :---: |
+| 원문 대조 통과 후보 / 모델이 낸 후보 | 1 / 23 (4.3%) | 20 / 47 (42.6%) |
+| 기준이 하나라도 통과한 법안 | 1 | 14 |
+| 시범 규칙과 일치 · 부분 일치 · 틀림 · 못 뽑음 | 0 · 0 · 1 · 25 | 7 · 5 · 2 · 12 |
+| JSON 형식 실패 | 11 | 알 수 없음 (서버가 정규식으로 대신함) |
+| 시간 · 비용 | 31분 (법안당 71초), 비용·외부 전송 없음 | API 사용료, 원문 외부 전송 |
+
+1.5B 모델은 짧게 쓴 서버 지시문의 형식 설명(`"용도|연면적|…"`)을 값으로 베끼는 경우가 많아 거의 뽑지 못했습니다. 원문 대조가 이를 모두 걸러 내므로 틀린 기준이 판정에 들어가지는 않습니다. 실제로 쓰려면 예시를 붙인 지시문이나 7B 이상 모델이 필요합니다 (노트북 9절).
 
 <br />
 
@@ -191,8 +219,10 @@ AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 
 
 | 기능 | 파일 | 하는 일 |
 | :--- | :--- | :--- |
-| 질의 도우미 | `server/api/ask.js` | 질문과 관련된 법안을 단어 일치로 골라 그 내용만 근거로 답함. 답에 나온 숫자가 근거에 있는지 대조 |
+| 질의 도우미 | `server/api/ask.js` | 13주차 검색 증강 생성(RAG): 질문과 관련된 법안을 단어 일치로 찾아(검색) 그 내용만 근거로 답을 생성. 답에 나온 숫자가 근거에 있는지 대조 |
 | 검토 에이전트 | `server/api/agent.js` | OpenAI 함수 호출로 모델이 도구(법안 조회, 기준 추출, 교차 확인, 건물 판정, 검토서 초안)를 골라 최대 8단계 실행. 근거 문구가 원문에 없으면 버림. 판정은 원문 대조를 통과한 기준이나 시범 규칙으로만 함. 한 번 실행 토큰 12,000 상한, 같은 법안 10분 캐시, IP당 1분 5회 |
+
+**로컬 모델로 바꾸기**: 검토 에이전트는 환경변수만으로 OpenAI 호환 서버(Ollama·vLLM 등)를 쓸 수 있습니다. `AGENT_LLM_BASE_URL`(예: `http://내부서버:11434/v1`), `AGENT_LLM_MODEL`(예: `qwen2.5:1.5b-instruct`, 없으면 `OPENAI_MODEL` 또는 `gpt-4o-mini`), `AGENT_LLM_KEY`(그 서버에 키가 있을 때만)를 주면 모든 모델 호출이 그 주소의 `/chat/completions`로 가고 OpenAI 키는 보내지 않습니다. 셋 다 비우면 지금처럼 OpenAI를 씁니다. 예: Ollama 서버에서 `ollama pull qwen2.5:1.5b-instruct` 뒤 `AGENT_LLM_BASE_URL=http://localhost:11434/v1 AGENT_LLM_MODEL=qwen2.5:1.5b-instruct npm run dev`. 어떤 모델이든 원문 대조를 통과한 기준만 판정에 쓰이고, 응답의 `extraction`(방법·후보 수·통과 수·버린 이유)으로 모델별 추출 결과를 비교할 수 있습니다. 질의 도우미(`ask.js`)는 OpenAI 그대로입니다.
 
 두 기능 모두 공개 법안 자료와 질문만 OpenAI로 보내며, 개인정보가 든 질문과 개별 건물 판정 질문은 서버에서 고정 문구로 거절합니다. 결과에는 항상 「사람 확인 필요」가 붙습니다.
 

@@ -266,6 +266,17 @@ table.dt { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .near-more { margin: 8px 0 0; }
 .near-dist { margin: 10px 0 0; }
 
+/* 상황판: 다음 주 예상 발의량 (RNN 추정, 참고용) */
+.vol-card { margin-top: 16px; }
+.vol-body { display: grid; grid-template-columns: minmax(150px, auto) minmax(0, 1fr); gap: 16px; align-items: center; margin: 8px 0 4px; }
+.vol-chart { display: block; width: 100%; max-width: 520px; height: auto; justify-self: end; }
+.vol-rmse { margin: 6px 0 0; color: var(--ink-2); }
+.vol-note { margin: 4px 0 0; }
+@media (max-width: 560px) {
+  .vol-body { grid-template-columns: 1fr; }
+  .vol-chart { justify-self: stretch; }
+}
+
 /* 판정 막대 */
 .sbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-2); min-width: 120px; margin-top: 6px; }
 .sbar i { display: block; height: 100%; }
