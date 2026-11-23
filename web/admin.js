@@ -346,6 +346,7 @@
     html += newBillsCard();
     html += nearPassCard();
     html += passTierSummary();
+    html += '<div id="volume-slot"></div>';
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
@@ -395,6 +396,62 @@
     });
     var more = document.getElementById("near-more");
     if (more) more.addEventListener("click", function () { ui.bills.stage = "near"; ui.bills.page = 0; });
+    fillVolumeCard();
+  }
+
+  // 상황판 카드: 다음 주 예상 발의량 (notebooks/bill_volume_rnn.ipynb 가 내보낸 숫자). 파일이 없으면 카드를 그리지 않는다
+  var volumePromise = null;
+  function fillVolumeCard() {
+    if (!volumePromise) volumePromise = getJSON("data/models/bill_volume_rnn.json").catch(function () { return null; });
+    volumePromise.then(function (v) {
+      var slot = document.getElementById("volume-slot");
+      if (!slot || !v || !v.forecast || !v.recent || !v.recent.length) return;
+      slot.innerHTML = volumeCard(v);
+    });
+  }
+  function monthDay(s) { var p = String(s).split("-"); return Number(p[1]) + "월 " + Number(p[2]) + "일"; }
+  function addDays(s, n) {
+    var d = new Date(s + "T00:00:00");
+    d.setDate(d.getDate() + n);
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
+  }
+  function volumeCard(v) {
+    var f = v.forecast, r = v.rmse || {};
+    var n = Math.round(f.count);
+    var cmp = "";
+    if (typeof r.simple_rnn === "number" && typeof r.naive_last_week === "number") {
+      cmp = "평균 오차 약 " + r.simple_rnn.toFixed(1) + "건 · 지난주 값을 그대로 쓰면 " + r.naive_last_week.toFixed(1) + "건 (" +
+        (r.simple_rnn < r.naive_last_week ? "이 예측의 오차가 더 작음" : "지난주 값이 더 정확함") + ", 지난 시험 기간 기준)";
+    }
+    return '<div class="card vol-card" id="vol-card"><div class="near-head"><h3>다음 주 예상 발의량 (국토교통위원회)</h3>' +
+      '<span class="tag check" title="신경망 추정값입니다. 국회 일정에 따라 크게 빗나갈 수 있습니다">예측·참고용</span></div>' +
+      '<div class="vol-body"><div><div class="near-count" id="vol-num">약 ' + fmt(n) + "건</div>" +
+      '<div class="muted small">' + esc(monthDay(f.week_start)) + " ~ " + esc(monthDay(addDays(f.week_start, 6))) + " 주 · 의원 발의</div></div>" +
+      volumeChart(v.recent, f) + "</div>" +
+      (cmp ? '<p class="small vol-rmse">' + esc(cmp) + "</p>" : "") +
+      '<p class="muted small vol-note">팀이 직접 학습한 SimpleRNN 추정 · 지난 ' + esc(v.look_back) + "주 건수만 보고 다음 주를 맞힘 · " +
+      "명절·휴회·임기 시작 같은 국회 일정은 모름 · 자료 기준일 " + esc(ymd(v.data_cutoff)) + "</p></div>";
+  }
+  // 최근 주 실제 건수 선 + 다음 주 예측 점 (작은 SVG)
+  function volumeChart(recent, f) {
+    var W = 320, H = 96, L = 4, R = 30, T = 14, B = 16;
+    var vals = recent.map(function (x) { return x.count; });
+    var max = Math.max.apply(null, vals.concat([f.count])) || 1;
+    var nx = recent.length;   // 예측 점은 마지막 다음 자리
+    var x = function (i) { return L + i * (W - L - R) / nx; };
+    var y = function (c) { return T + (1 - c / max) * (H - T - B); };
+    var pts = vals.map(function (c, i) { return x(i).toFixed(1) + "," + y(c).toFixed(1); }).join(" ");
+    var last = vals.length - 1;
+    var label = "최근 " + vals.length + "주 국토교통위원회 의원 발의 건수(" + vals[0] + "건에서 " + vals[last] + "건)와 다음 주 예상 " + Math.round(f.count) + "건";
+    return '<svg class="vol-chart" viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(label) + '">' +
+      '<line x1="' + L + '" x2="' + (W - R) + '" y1="' + y(0) + '" y2="' + y(0) + '" stroke="var(--line)"/>' +
+      '<polyline fill="none" stroke="var(--accent)" stroke-width="1.6" points="' + pts + '"/>' +
+      '<line x1="' + x(last) + '" y1="' + y(vals[last]) + '" x2="' + x(nx) + '" y2="' + y(f.count) + '" stroke="var(--warn)" stroke-width="1.4" stroke-dasharray="3 3"/>' +
+      '<circle cx="' + x(nx) + '" cy="' + y(f.count) + '" r="4" fill="var(--warn)"/>' +
+      '<text x="' + (x(nx) + 6) + '" y="' + (y(f.count) + 4) + '" font-size="11" fill="var(--warn)">예상</text>' +
+      '<text x="' + L + '" y="10" font-size="10" fill="var(--muted)">최대 ' + Math.round(max) + "건</text>" +
+      '<text x="' + L + '" y="' + (H - 2) + '" font-size="10" fill="var(--muted)">' + esc(monthDay(recent[0].week_start)) + "</text>" +
+      '<text x="' + x(last) + '" y="' + (H - 2) + '" font-size="10" fill="var(--muted)" text-anchor="middle">' + esc(monthDay(recent[last].week_start)) + "</text></svg>";
   }
 
   // 상황판 카드: 곧 통과될 수 있는 법안 (법사위 회부 이후이고 아직 진행 중)
