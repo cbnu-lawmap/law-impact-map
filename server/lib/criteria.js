@@ -243,16 +243,24 @@ function verify(candidates, summary, opts = {}) {
   // 수치 기준마다 개정 문장에 놓인 후보가 있는지 (있으면 기타 문장 후보는 쓰지 않음)
   const amendAttrs = new Set();
   const kindsOf = new Map();
+  const requoted = new Map(); // i → 개정 문장 (모델이 다른 문장을 근거로 골랐지만 같은 수치·단위가 개정 문장에 있을 때)
   if (useSent) candidates.forEach((c, i) => {
     if (!c || !SENT_ATTRS.includes(c.attr) || !c.quote) return;
     const v = c.attr === "사용승인" ? String(c.value) : Number(String(c.value).replace(/,/g, ""));
-    const k = candidateKinds({ attr: c.attr, value: v, quote: c.quote }, text, sents);
+    let k = candidateKinds({ attr: c.attr, value: v, quote: c.quote }, text, sents);
+    if (!k.has(KIND_AMEND) && text.includes(normText(c.quote))) {
+      // 같은 수치·단위가 들어 있는 개정 문장이 꼭 하나면 그 문장을 근거로 바꾼다 (코드 규칙, 모델 판단 아님)
+      const hits = sents.filter((s) => s.kind === KIND_AMEND && valueRe({ attr: c.attr, value: v }).test(s.text) &&
+        (c.attr !== "연면적" || AREA_UNIT.test(s.text)));
+      if (hits.length === 1) { requoted.set(i, hits[0].text); k = new Set([KIND_AMEND]); }
+    }
     kindsOf.set(i, k);
     if (k.has(KIND_AMEND)) amendAttrs.add(c.attr);
   });
   candidates.forEach((c0, i) => {
     // AI 가 낸 값의 형태를 맞춘다 (숫자 문자열 → 숫자, 용도 한 개 → 배열)
     const c = Object.assign({}, c0);
+    if (requoted.has(i)) c.quote = requoted.get(i);
     if (NUM_ATTRS.includes(c.attr)) c.value = Number(String(c.value).replace(/,/g, ""));
     if (c.attr === "용도" && !Array.isArray(c.value)) c.value = [String(c.value)];
     if (c.attr === "위임") c.value = String(c.value);
