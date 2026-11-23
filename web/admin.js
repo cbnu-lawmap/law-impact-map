@@ -680,7 +680,9 @@
     if (b.pass_prob == null) return "";
     var t = passTier(b);
     var head = t ? "통과 가능성 " + t.name + " (같은 구간 21대 실제 반영률 " + Math.round(t.actual_rate * 100) + "%)" : "통과 가능성 " + passPct(b);
-    return '<p class="small muted" style="margin-top:-6px" title="신경망 추정 확률 ' + Math.round(b.pass_prob * 100) + '%">' + esc(head) +
+    var tip = "신경망 추정 확률 " + Math.round(b.pass_prob * 100) + "%" +
+      (t ? " · 구간과 실제 반영률은 21대 나중에 낸 법안(먼저 낸 법안으로 학습한 시간 분리 시험)에서 정함" : "");
+    return '<p class="small muted" style="margin-top:-6px" title="' + esc(tip) + '">' + esc(head) +
       " · 신경망 추정 · 제안한 날 알 수 있는 정보만 사용 · 21대 국회 처리 결과로 학습 · 법안의 좋고 나쁨과 무관</p>";
   }
   // 분야 분류에 쓰는 모델 (노트북이 검증 성적이 높은 쪽을 고름)
