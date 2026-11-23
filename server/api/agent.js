@@ -4,7 +4,7 @@
  * 법안 하나(의안번호 7자리)를 받아 AI 가 도구를 골라 부르며 검토 초안을 만든다.
  * 도구 (OpenAI chat.completions 의 tools)
  *   get_bill          법안 요약·위원회·제안일·단계
- *   extract_criteria  요약에서 적용 기준(용도·연면적·층수·사용승인·위임) 뽑기 + 원문 대조 (lib/criteria.js)
+ *   extract_criteria  요약에서 적용 기준(용도·연면적·층수·세대수·사용승인·위임) 뽑기 + 원문 대조 (lib/criteria.js)
  *   crosscheck        crosscheck.json 의 출처별 기준과 비교
  *   judge_buildings   web/judge.js 와 같은 판정 로직(lib/judge.js 복사본)으로 사창동 건물 집계
  *   draft_review      모은 결과로 검토 초안 문단 쓰기
@@ -74,7 +74,7 @@ async function loadData() {
   // 판정에 필요한 속성만 남긴다 (PNU 도 쓰지 않음)
   const props = g.features.map((f) => {
     const p = f.properties;
-    return { usability: p.usability, totalarea: p.totalarea, grnd_flr: p.grnd_flr, useapr_day: p.useapr_day };
+    return { usability: p.usability, totalarea: p.totalarea, grnd_flr: p.grnd_flr, useapr_day: p.useapr_day, hhld_cnt: p.hhld_cnt };
   });
   const byNo = {};
   b.bills.forEach((v) => { byNo[v.no] = v; });
@@ -116,6 +116,7 @@ const TOOLS = [
           용도: { type: "array", items: { type: "string" } },
           연면적: { type: "object", properties: { min: { type: "number" }, max: { type: "number" } } },
           층수: { type: "object", properties: { min: { type: "number" }, max: { type: "number" } } },
+          세대수: { type: "object", properties: { min: { type: "number" }, max: { type: "number" } } },
           사용승인: { type: "object", properties: { before: { type: "string" } } },
           위임: { type: "array", items: { type: "string" } },
         },
@@ -143,9 +144,9 @@ const SYSTEM = [
 
 // 기준 뽑기 지시문 (extract_criteria). notebooks/local_llm_extraction.ipynb 도 data/verify_cases.json 을 거쳐 같은 글을 쓴다
 const EXTRACT_PROMPT =
-  "법안 요약에서 건축물 적용 기준만 JSON 으로 뽑는다. 형식: {\"items\":[{\"attr\":\"용도|연면적|층수|사용승인|위임\",\"bound\":\"min|max\",\"value\":값,\"quote\":\"근거 문구\"}]}. " +
+  "법안 요약에서 건축물 적용 기준만 JSON 으로 뽑는다. 형식: {\"items\":[{\"attr\":\"용도|연면적|층수|세대수|사용승인|위임\",\"bound\":\"min|max\",\"value\":값,\"quote\":\"근거 문구\"}]}. " +
   "quote 는 요약 원문을 한 글자도 바꾸지 말고 그대로 옮긴 160자 이내 문구. 용도 value 는 주용도 코드 배열 (" +
-  Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자. " +
+  Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자, 세대수는 세대 수 숫자 (quote 에 '30세대' 처럼 수치와 '세대' 가 붙어 있어야 함). " +
   "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
   "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.";
 
@@ -258,8 +259,8 @@ function mockLLM() {
 // ---------------------------------------------------------------- 한 번 실행
 function fmt(n) { return Number(n).toLocaleString("ko-KR"); }
 
-// 건물을 실제로 가를 수 있는 기준(용도·연면적·층수·사용승인)이 하나라도 있는지. 위임만 있거나 비어 있으면 false
-const SPLIT_KEYS = ["용도", "연면적", "층수", "사용승인"];
+// 건물을 실제로 가를 수 있는 기준(용도·연면적·층수·세대수·사용승인)이 하나라도 있는지. 위임만 있거나 비어 있으면 false
+const SPLIT_KEYS = ["용도", "연면적", "층수", "세대수", "사용승인"];
 function judgeable(rule) {
   if (!rule || typeof rule !== "object") return false;
   return SPLIT_KEYS.some((k) => {
@@ -270,7 +271,7 @@ function judgeable(rule) {
     return String(v) !== "";
   });
 }
-const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·사용승인 기준 없이 위임만 있거나 비어 있음)";
+const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·세대수·사용승인 기준 없이 위임만 있거나 비어 있음)";
 const HOLD_DELEG = "판정 보류: 시행령(대통령령 등)에 위임돼 기준 확정 전";
 const HOLD_NONE = "판정 보류: 요약문에서 판정 기준을 찾지 못함";
 const DEMO_FALLBACK_DELEG = "추출 기준이 위임뿐이라 시범 규칙 사용";
@@ -291,7 +292,7 @@ async function run(D, no, note, llm) {
 
   // 판정에 넘긴 규칙은 원문 대조를 통과한 규칙이나 판정 시범 규칙과 똑같아야 한다.
   // 지어낸 수치·용도를 막고, 위임 같은 기준을 빼서 대상이 부풀려지는 것도 막는다.
-  const KEYS = ["용도", "연면적", "층수", "사용승인", "위임"];
+  const KEYS = ["용도", "연면적", "층수", "세대수", "사용승인", "위임"];
   function canon(rule) {
     const out = {};
     KEYS.forEach((k) => {
@@ -473,7 +474,7 @@ async function run(D, no, note, llm) {
       for (const p of D.props) {
         if (samples.length >= 3) break;
         const r = Judge.judge(p, clean);
-        if (r.status === st) samples.push({ status: st, 용도: Judge.useName(p.usability), 연면적: p.totalarea, 층수: p.grnd_flr, 사용승인: p.useapr_day ? String(p.useapr_day).slice(0, 4) : null });
+        if (r.status === st) samples.push({ status: st, 용도: Judge.useName(p.usability), 연면적: p.totalarea, 층수: p.grnd_flr, 세대수: p.hhld_cnt || null, 사용승인: p.useapr_day ? String(p.useapr_day).slice(0, 4) : null });
       }
       if (samples.length) break;
     }

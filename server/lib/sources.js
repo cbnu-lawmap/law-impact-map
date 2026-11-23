@@ -30,7 +30,7 @@ const ST_DELEG = "위임 확인";
 const ST_LOW = "부족";
 const ST_CAND = "후보";
 const RANK = { [ST_OK]: 3, [ST_DELEG]: 2, [ST_LOW]: 1 };
-const ATTRS = ["용도", "연면적", "층수", "사용승인"];
+const ATTRS = ["용도", "연면적", "층수", "세대수", "사용승인"];
 const CURRENT_LAW = "개정 내용을 말하는 문장이 아님 (현행법·참고 설명일 수 있음)";
 // 검토보고서 문장이 개정 내용을 말하는지 (개정안, 안 제N조, 신설, …하려는 것)
 const AMEND_MARK = /개정안|안\s*제\s*\d|신설|하려는|하려고|하도록\s*함/;
@@ -41,11 +41,12 @@ const CUES = {
   용도: null, // 용도 낱말은 extractCandidates 의 용도 후보로 본다
   연면적: /연면적|바닥면적|제곱미터|㎡|규모/,
   층수: /층수|\d+\s*층|고층/,
+  세대수: /세대수|\d[\d,]*\s*(?:만|천)?\s*세대\s*(?:이상|이하|미만|초과)/,
   사용승인: /준공|사용승인|노후/,
 };
 
 // 위임 문구가 그 기준을 넘긴 것인지 (위임한 기준 이름이나 위임 문장에 이 낱말이 있으면)
-const DELEG_WORD = { 용도: /용도/, 연면적: /규모|면적/, 층수: /층/, 사용승인: /준공|사용승인|노후/ };
+const DELEG_WORD = { 용도: /용도/, 연면적: /규모|면적/, 층수: /층/, 세대수: /세대/, 사용승인: /준공|사용승인|노후/ };
 
 // 다음 출처를 고르는 이유 (평가 결과 → 다음 출처)
 const NEXT_WHY = {
@@ -119,7 +120,7 @@ function searchSource(D, no, source) {
 function dropAmbiguous(cands) {
   const vals = {};
   cands.forEach((c) => {
-    if (c.attr !== "연면적" && c.attr !== "층수") return;
+    if (!Criteria.NUM_ATTRS.includes(c.attr)) return;
     const k = c.attr + "|" + c.bound;
     (vals[k] = vals[k] || new Set()).add(Number(String(c.value).replace(/,/g, "")));
   });

@@ -4,11 +4,11 @@
  * 뽑기는 정규식으로 한다 (AI 호출 없음, 토큰을 쓰지 않음). 뽑은 기준마다 근거 문구(evidence)를 붙인다.
  * 대조는 collect/build_web_data.py 의 check_source() 와 같은 생각이다.
  *   1. 근거 문구가 법안 요약 원문에 그대로 있어야 한다 (공백만 맞춘다)
- *   2. 연면적·층수 수치는 근거 문구에 나와야 한다 (1000 → 1000, 1,000, 1천 / 100000 → 10만)
+ *   2. 연면적·층수·세대수 수치는 근거 문구에 나와야 한다 (1000 → 1000, 1,000, 1천 / 100000 → 10만)
  *   3. 사용승인은 기준일(REF_DATE) - N년 이고, 근거 문구에 "N년" 이 있어야 한다
  *   4. 뽑은 값 자체가 근거 문장 안에 있어야 한다 ("근거 문장에 없는 값 제외")
  *      - 용도: 그 코드의 시설 이름(별표1 호 이름, 하위 시설 예. 예: 물류터미널 → 창고시설)이 근거에 있어야 한다
- *      - 연면적: 수치와 면적 단위(㎡·제곱미터), 층수: 수치와 "층", 위임: 위임한 기준 이름
+ *      - 연면적: 수치와 면적 단위(㎡·제곱미터), 층수: 수치와 "층", 세대수: 수치 바로 뒤에 "세대" (30세대, 1천 세대), 위임: 위임한 기준 이름
  * 하나라도 어긋나면 그 기준은 버린다. 나중에 AI 가 뽑은 기준을 넣어도 같은 대조를 거친다.
  */
 const { USE_NAMES } = require("./judge");
@@ -35,6 +35,11 @@ function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function numberInText(n, text) {
   return numberForms(n).some((f) => new RegExp("(?<![\\d,])" + escapeRe(f) + "(?![\\d,])").test(text));
 }
+// 수치 바로 뒤에 단위가 붙어 있는지 (30세대, 1천 세대, 1,000세대)
+function numberWithUnit(n, unit, text) {
+  return numberForms(n).some((f) => new RegExp("(?<![\\d,])" + escapeRe(f) + "\\s*" + unit).test(text));
+}
+const NUM_ATTRS = ["연면적", "층수", "세대수"];
 
 // 용도 낱말 → 건축물대장 주용도 코드. "학교", "병원" 처럼 주변 설명에도 흔히 나오는 말은 넣지 않는다
 const USE_WORDS = [
@@ -101,6 +106,14 @@ function extractCandidates(summary) {
   while ((m = floor.exec(text))) {
     out.push({ attr: "층수", bound: toBound(m[2]), value: Number(m[1]), quote: quoteAround(text, m.index, m[0].length) });
   }
+  // 세대수: "30세대 이상", "1천세대 이상". "1세대 1주택", "1세대당" 처럼 경계 낱말이 바로 붙지 않으면 뽑지 않는다
+  const hh = /(\d[\d,]*)\s*(만|천)?\s*세대\s*(이상|이하|미만|초과)/g;
+  while ((m = hh.exec(text))) {
+    let v = Number(m[1].replace(/,/g, ""));
+    if (m[2] === "만") v *= 10000;
+    if (m[2] === "천") v *= 1000;
+    out.push({ attr: "세대수", bound: toBound(m[3]), value: v, quote: quoteAround(text, m.index, m[0].length) });
+  }
   const age = /(?:준공|사용승인)[^.]{0,15}?(\d{1,3})\s*년\s*(?:이상|이 지난|경과)/g;
   while ((m = age.exec(text))) {
     const before = String(Number(REF_DATE.slice(0, 4)) - Number(m[1])) + REF_DATE.slice(4);
@@ -146,21 +159,22 @@ function verify(candidates, summary) {
   candidates.forEach((c0) => {
     // AI 가 낸 값의 형태를 맞춘다 (숫자 문자열 → 숫자, 용도 한 개 → 배열)
     const c = Object.assign({}, c0);
-    if (c.attr === "연면적" || c.attr === "층수") c.value = Number(String(c.value).replace(/,/g, ""));
+    if (NUM_ATTRS.includes(c.attr)) c.value = Number(String(c.value).replace(/,/g, ""));
     if (c.attr === "용도" && !Array.isArray(c.value)) c.value = [String(c.value)];
     if (c.attr === "위임") c.value = String(c.value);
     const quote = normText(c.quote);
     let why = "";
-    if (!["용도", "연면적", "층수", "사용승인", "위임"].includes(c.attr)) why = "모르는 기준";
-    else if ((c.attr === "연면적" || c.attr === "층수") && (!isFinite(c.value) || c.value <= 0 || !["min", "max"].includes(c.bound))) why = "수치나 경계(min·max)가 올바르지 않음";
+    if (!["용도", "연면적", "층수", "세대수", "사용승인", "위임"].includes(c.attr)) why = "모르는 기준";
+    else if (NUM_ATTRS.includes(c.attr) && (!isFinite(c.value) || c.value <= 0 || !["min", "max"].includes(c.bound))) why = "수치나 경계(min·max)가 올바르지 않음";
     else if (!quote || !text.includes(quote)) why = "근거 문구가 요약 원문에 그대로 없음";
-    else if ((c.attr === "연면적" || c.attr === "층수") && !numberInText(c.value, quote)) why = "수치 " + c.value + " 가 근거 문구에 없음";
+    else if (NUM_ATTRS.includes(c.attr) && !numberInText(c.value, quote)) why = "수치 " + c.value + " 가 근거 문구에 없음";
     else if (c.attr === "사용승인") {
       const years = Number(REF_DATE.slice(0, 4)) - Number(String(c.value).slice(0, 4));
       if (String(c.value).slice(4) !== REF_DATE.slice(4) || !new RegExp("(?<!\\d)" + years + "\\s*년").test(quote)) why = "근거 문구에 '" + years + "년' 이 없음";
     } else if (c.attr === "용도" && !(Array.isArray(c.value) && c.value.every((v) => USE_NAMES[v]))) why = "모르는 용도 코드";
     else if (c.attr === "연면적" && !AREA_UNIT.test(quote)) why = NOT_IN_QUOTE + " (면적 단위)";
     else if (c.attr === "층수" && !new RegExp("(?<![\\d,])" + c.value + "\\s*층").test(quote)) why = NOT_IN_QUOTE + " (" + c.value + "층)";
+    else if (c.attr === "세대수" && !numberWithUnit(c.value, "세대", quote)) why = NOT_IN_QUOTE + " (" + c.value + "세대)";
     else if (c.attr === "위임" && !quote.replace(/\s+/g, "").includes(c.value.replace(/\s+/g, ""))) why = NOT_IN_QUOTE + " (" + c.value + ")";
     // 위임은 근거 문장에 실제 위임 문구(대통령령·부령·조례로 정하는 …)가 있어야 하고, 값은 짧은 기준 이름이어야 한다
     else if (c.attr === "위임" && !new RegExp(DELEG_RE.source).test(quote)) why = DELEG_NO_PHRASE;
@@ -194,7 +208,7 @@ function extract(summary) { return verify(extractCandidates(summary), summary); 
 function ruleTexts(rule) {
   const out = {};
   if (rule.용도) out.용도 = rule.용도.map((c) => USE_NAMES[c] || c).join("·");
-  [["연면적", "㎡"], ["층수", "층"]].forEach(([k, unit]) => {
+  [["연면적", "㎡"], ["층수", "층"], ["세대수", "세대"]].forEach(([k, unit]) => {
     const r = rule[k];
     if (!r) return;
     const parts = [];
@@ -307,7 +321,7 @@ function extractFromDoc(raw) {
   const cands = extractCandidates(text);
   const vals = {};
   cands.forEach((c) => {
-    if (c.attr !== "연면적" && c.attr !== "층수") return;
+    if (!NUM_ATTRS.includes(c.attr)) return;
     const k = c.attr + "|" + c.bound;
     (vals[k] = vals[k] || new Set()).add(c.value);
   });
@@ -322,5 +336,5 @@ function extractFromDoc(raw) {
   return { text, rule: r.rule, evidence: r.evidence, dropped: dropped0.concat(r.dropped) };
 }
 
-module.exports = { NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
+module.exports = { NUM_ATTRS, NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
   prepDocText, amendedText, extractFromDoc };

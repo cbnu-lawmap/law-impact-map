@@ -16,14 +16,14 @@ const S = require("./sources");
 const { numbersNotInContext } = require("./common");
 
 const MAX_RESEARCH = 3;
-const SPLIT_KEYS = ["용도", "연면적", "층수", "사용승인"];
-const KEYS = ["용도", "연면적", "층수", "사용승인", "위임"];
+const SPLIT_KEYS = ["용도", "연면적", "층수", "세대수", "사용승인"];
+const KEYS = ["용도", "연면적", "층수", "세대수", "사용승인", "위임"];
 const HOLD_DELEG = "판정 보류: 시행령(대통령령 등)에 위임돼 기준 확정 전";
 const HOLD_NONE_ALL = "판정 보류: 찾아본 출처에서 판정 기준을 찾지 못함";
 const TODO_DECREE = "시행령 입법예고 확인";
 const TODO_CHECK = "법안 원문(조문 대비표)과 후보 규칙 사람 확인";
 const DEMO_FALLBACK = "근거 있는 추출 기준이 없어 시범 규칙 사용";
-const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·사용승인 기준 없이 위임만 있거나 비어 있음)";
+const NO_SPLIT = "판정할 기준이 없음 (건물을 가르는 용도·연면적·층수·세대수·사용승인 기준 없이 위임만 있거나 비어 있음)";
 
 const TOOL_KO = {
   search_sources: "출처 찾기",
