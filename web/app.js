@@ -103,7 +103,7 @@
             tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
             tileSize: 256,
             maxzoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보 · 건축물대장',
           },
         },
         layers: [{
@@ -586,11 +586,11 @@
       console.log((ok ? "✅ 일치" : "❌ 불일치") + " " + no + " " + d.title, { judge_js: got, expected: d.counts });
       if (no === "2220631") {
         var maxArea = Math.max.apply(null, state.props.map(function (p) { return Number(p.totalarea) || 0; }));
-        console.log("   사창동 최대 연면적 " + fmt(Math.round(maxArea)) + "㎡ (기대 34,703㎡) · 대상 " + got.대상 + "동 · 경계선 " + got.경계선 + "동");
+        console.log("   사창동 최대 연면적 " + fmt(Math.round(maxArea)) + "㎡ (기대 " + fmt(d.max_totalarea) + "㎡) · 대상 " + got.대상 + "동 · 경계선 " + got.경계선 + "동");
       }
       if (no === "2220895") {
         var n2 = state.props.filter(function (p) { return !Judge.isEmpty(p.grnd_flr) && p.grnd_flr >= 2; }).length;
-        console.log("   2층 이상 후보 " + fmt(n2) + "동 (기대 1,836동) → 시행령 위임으로 판정불가");
+        console.log("   2층 이상 후보 " + fmt(n2) + "동 (기대 " + fmt(d.candidates_2f_plus) + "동) → 시행령 위임으로 판정불가");
       }
     });
     console.groupEnd();

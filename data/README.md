@@ -10,7 +10,7 @@ CSV 데이터 보관 폴더
 | 건축물대장 | 건축데이터 개방 | | 1차 판정은 아래 건물통합정보로 충분, 세대수·층별용도가 필요할 때 보완 |
 | 건물 도형 | 브이월드(V-WORLD) | | |
 | `bldginfo_사창동.csv` / `.geojson` | 브이월드 WFS `lt_c_bldginfo` (건물통합정보) | 2026-10-31 | 사창동(행정동) 경계 안 2,448동, 건물명(`bld_nm`) 제외. CSV는 속성, geojson은 지도용 도형 (`collect/fetch_cheongju_buildings.py`로 재생성) |
-| `bldg_register_사창동.csv` (아직 없음) | 공공데이터포털 건축물대장 표제부 | | 받으면 이 이름으로 둔다. 열: `pnu`(19자리), `totalarea`·`useapr_day`·`grnd_flr`·`hhld_cnt`·`main_purps_cd` (API 이름 `totArea`·`useAprDay`·`grndFlrCnt`·`hhldCnt`·`mainPurpsCd` 도 됨). `collect/build_web_data.py` 와 `notebooks/building_imputation.ipynb` 가 브이월드에서 **빈 칸만** 채운다 (그 PNU 에 표제부 한 줄, 건물도 한 동일 때만). 없으면 아무것도 바뀌지 않는다 |
+| `bldg_register_사창동.csv` | 공공데이터포털 건축HUB 건축물대장 표제부 (`getBrTitleInfo`) | 2026-11-23 | 사창동 건물 필지 1,935개의 표제부 2,706줄 (`collect/collect_register.py`, Actions `collect-register.yml`). 열: `pnu`(19자리), `mgm_bldrgst_pk`, `main_purps_cd`·`main_purps_nm`, `totalarea`, `useapr_day`, `grnd_flr`, `hhld_cnt`. 건물명·동명 제외. `collect/build_web_data.py` 와 `notebooks/building_imputation.ipynb` 가 그 PNU 에 표제부 한 줄·건물 한 동일 때 **대장 값 우선**으로 쓴다. 비교는 `docs/bldg_register_analysis.md` |
 | `cheongju_emd.geojson` | 바람의 지도 프로젝트에서 복사 (원 출처 확인 필요) | 2026-10-31 복사 | 청주 행정동 43개 경계 |
 | `cheongju_buildings_footprint.geojson` | 출처 확인 필요 | 2026-10-31 복사 | 13,166동, 높이(`h`)만. 청주 전체가 아님 (사창동 경계 안 150동) |
 

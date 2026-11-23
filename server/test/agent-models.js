@@ -68,8 +68,9 @@ test("predict_pass: 모델 결과가 있으면 확률과 성능, 없으면 '모�
     assert.strictEqual(st.ok, false);
     assert.ok(/아직 없습니다|예측이 없습니다/.test(st.summary), st.summary);
   }
-  // 모델 도구 결과와 상관없이 판정은 그대로
-  assert.deepStrictEqual(r.body.counts, { 대상: 894, 경계선: 46, 비대상: 1166, 판정불가: 342 });
+  // 모델 도구 결과와 상관없이 판정은 그대로 (같은 법안 판정 시범 동수와 같음. 건물 자료를 다시 만들면 동수도 바뀌므로 파일에서 읽는다)
+  const demo = require(path.join(process.env.DATA_DIR, "demo_rules.json")).demos.find((d) => d.bill_no === "2206436");
+  assert.deepStrictEqual(r.body.counts, demo.counts);
 });
 
 (async () => {

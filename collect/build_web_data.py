@@ -4,7 +4,7 @@
 
   web/data/buildings.geojson  사창동 건물 (판정용 속성 6개만, 좌표 소수 6자리)
                               값 출처 순서: ① 브이월드 건물통합정보 → ② 건축물대장 표제부
-                              (data/bldg_register_사창동.csv, 있을 때만. 빈 칸만 채우고 reg 에 속성 이름을 남김)
+                              (data/bldg_register_사창동.csv, 있을 때만. 필지에 대장 한 줄·건물 한 동이면 대장 값 우선, 바꾼 속성 이름을 reg 에 남김)
                               → ③ 그래도 빈 속성에만 신경망 추정 est_area·est_area_p (연면적),
                               est_year·est_year_p (사용승인 연대), est_flr·est_p (지상층수). 추정은 참고용, 판정에 안 씀
   web/data/boundary.geojson   사창동 행정동 경계
@@ -130,7 +130,7 @@ DEMO_RULES = [
         "source_text": "연면적이 10만㎡ 이상인 물류터미널에도 강화된 소방시설 기준을 적용",
         "rule": {"용도": ["18000"], "연면적": {"min": 100000}},
         "rule_note": "물류터미널은 건축법 시행령 별표1 18호 창고시설이므로 주용도 18000 (data/building_use_codes.csv)",
-        "conclusion": "사창동 최대 연면적이 34,703㎡라 대상 0동, 경계선(9만~10만㎡) 0동",
+        "conclusion": "사창동 최대 연면적이 {max_totalarea:,}㎡라 대상 {대상}동, 경계선(9만~10만㎡) {경계선}동",
     },
     {
         "bill_no": "2220895",
@@ -138,7 +138,7 @@ DEMO_RULES = [
         "source_text": "대통령령으로 정하는 용도 및 규모의 건축물의 2층 이상인 층에 있는 노대(露臺)에 높이 1.2미터 이상의 난간 설치",
         "rule": {"층수": {"min": 2}, "위임": ["용도", "연면적"]},
         "rule_note": "용도·규모를 시행령에 위임했으므로 2층 이상 건물도 판정불가(후보)로 둠",
-        "conclusion": "2층 이상 1,836동이 후보지만 용도·규모를 시행령에 위임했으므로 판정불가",
+        "conclusion": "2층 이상 {candidates_2f_plus:,}동이 후보지만 용도·규모를 시행령에 위임했으므로 판정불가",
     },
 ]
 for _d in DEMO_RULES:
@@ -444,7 +444,7 @@ def load_estimates(features):
     return est
 
 
-# 건축물대장 표제부 (공공데이터포털). 아직 없음: 받으면 이 이름으로 data/ 에 둔다. 없으면 아무것도 바꾸지 않는다.
+# 건축물대장 표제부 (공공데이터포털, collect/collect_register.py 가 받음). 없으면 아무것도 바꾸지 않는다.
 REGISTER = os.path.join(DATA, f"bldg_register_{EMD}.csv")
 # 건물 속성 ← 표제부 열 이름 (우리 이름, API 이름). 세대수(hhld_cnt)는 아직 판정 규칙에 없어 쓰지 않는다
 REG_COLS = {"totalarea": ("totalarea", "totArea"), "useapr_day": ("useapr_day", "useAprDay"),
@@ -452,50 +452,67 @@ REG_COLS = {"totalarea": ("totalarea", "totArea"), "useapr_day": ("useapr_day", 
 
 
 def reg_value(attr, v):
+    """표제부 칸 값 → 우리 속성 값. 비었거나 0, 형식이 맞지 않으면 None (그 속성은 브이월드 값을 둔다)"""
     v = (v or "").strip()
     if not v:
         return None
     try:
         if attr == "totalarea":
-            return round(float(v), 2)
+            return round(float(v), 2) or None
         if attr == "grnd_flr":
-            return int(float(v))
+            return int(float(v)) or None
     except ValueError:
         return None
     if attr == "useapr_day":
-        return v.replace("-", "")[:8]
+        v = v.replace("-", "")[:8]
+        return v if re.fullmatch(r"(19|20)\d{6}", v) else None
+    if attr == "usability":
+        return v if re.fullmatch(r"\d{5}", v) else None
     return v
 
 
-def merge_register(props_list):
-    """표제부 값으로 브이월드에서 빈 칸만 채운다 (있는 값은 바꾸지 않음). 표제부는 필지(PNU) 단위라
-    그 PNU 에 표제부 한 줄, 지도 건물도 한 동일 때만 채운다. 채운 속성 이름은 props["reg"] 에 남긴다.
-    실제 대장 값이므로 판정에도 쓰인다. 파일이 없으면 아무것도 하지 않는다."""
+def read_register():
+    """표제부를 PNU 별 줄 목록으로. 파일이 없으면 None"""
     if not os.path.exists(REGISTER):
-        print(f"  {os.path.basename(REGISTER)} 없음: 건축물대장 표제부로 채우지 않음 (바뀌는 것 없음)")
-        return
+        return None
     with open(REGISTER, encoding="utf-8-sig", newline="") as f:
         rows = list(csv.DictReader(f))
     by_pnu = {}
     for r in rows:
         by_pnu.setdefault(str(r.get("pnu", "")).strip(), []).append(r)
+    return by_pnu
+
+
+def register_matches(props_list, by_pnu):
+    """지도 건물 순번 → 표제부 한 줄. 표제부는 필지(PNU) 단위라 그 PNU 에 표제부 한 줄, 지도 건물도 한 동일 때만 맞춘다"""
     n_bldg = Counter(str(p.get("pnu")) for p in props_list)
-    filled = Counter()
-    for p in props_list:
-        pnu = str(p.get("pnu"))
-        if n_bldg[pnu] != 1 or len(by_pnu.get(pnu, [])) != 1:
-            continue
-        r = by_pnu[pnu][0]
+    return {i: by_pnu[str(p.get("pnu"))][0] for i, p in enumerate(props_list)
+            if n_bldg[str(p.get("pnu"))] == 1 and len(by_pnu.get(str(p.get("pnu")), [])) == 1}
+
+
+def merge_register(props_list):
+    """판정은 대장 값 우선: 맞춘 건물(register_matches)은 표제부에 값이 있는 속성을 표제부 값으로 바꾼다.
+    브이월드 빈 칸을 채우거나 다른 값을 바꾼 속성 이름은 props["reg"] 에 남긴다 (같은 값이면 남기지 않음).
+    브이월드 원래 값은 공개 파일에 넣지 않는다 (비교 결과는 docs/bldg_register_analysis.md).
+    표제부가 비었거나 0 인 속성은 브이월드 값을 그대로 둔다. 파일이 없으면 아무것도 하지 않는다."""
+    by_pnu = read_register()
+    if by_pnu is None:
+        print(f"  {os.path.basename(REGISTER)} 없음: 건축물대장 표제부를 쓰지 않음 (바뀌는 것 없음)")
+        return
+    match = register_matches(props_list, by_pnu)
+    filled, replaced = Counter(), Counter()
+    for i, r in match.items():
+        p = props_list[i]
         for attr, cols in REG_COLS.items():
             col = next((c for c in cols if c in r), None)
-            if col is None or not empty(p.get(attr)):
+            v = reg_value(attr, r[col]) if col else None
+            if empty(v) or p.get(attr) == v:
                 continue
-            v = reg_value(attr, r[col])
-            if not empty(v):
-                p[attr] = v
-                p.setdefault("reg", []).append(attr)
-                filled[attr] += 1
-    print(f"  건축물대장 표제부 {len(rows)}줄: 빈 칸 채움 {dict(filled)}")
+            (filled if empty(p.get(attr)) else replaced)[attr] += 1
+            p[attr] = v
+            p.setdefault("reg", []).append(attr)
+    print(f"  건축물대장 표제부 {sum(map(len, by_pnu.values()))}줄, 맞춘 건물 {len(match)}동: "
+          f"빈 칸 채움 {dict(filled)}, 다른 값 바꿈 {dict(replaced)}")
 
 
 SEEN = os.path.join(DATA, "bills_seen.csv")   # 법안을 처음 본 날 (매일 수집 워크플로가 갱신)
@@ -651,6 +668,8 @@ def main():
         if d["bill_no"] == "2220895":
             extra["candidates_2f_plus"] = sum(
                 1 for p in props if not empty(p["grnd_flr"]) and p["grnd_flr"] >= 2)
+        if "{" in d["conclusion"]:   # 사람 추출 결론의 숫자는 데이터에서 센 값으로 채운다
+            d["conclusion"] = d["conclusion"].format(**counts, **extra)
         out.append({**d, "counts": counts, **extra})
         print(f"  [{d['bill_no']}] {counts} {extra}")
     dump({"region": EMD, "total": len(props), "demos": out}, "demo_rules.json")
