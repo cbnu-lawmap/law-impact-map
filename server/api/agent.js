@@ -86,16 +86,16 @@ function cacheGet(key) {
 const reasonParam = { type: "string", description: "이 도구를 지금 부르는 이유 (한국어 한 문장)" };
 const noParam = { type: "string", description: "의안번호 7자리" };
 const TOOLS = [
-  { name: "get_bill", description: "법안 요약, 소관 위원회, 제안일, 진행 단계를 읽는다.", props: { no: noParam } },
-  { name: "extract_criteria", description: "법안 요약에서 건축물 적용 기준(용도, 연면적, 층수, 사용승인, 시행령 위임)을 뽑고 원문 대조를 통과한 것만 돌려준다. 이미 판정한 시범 규칙(demo_rule)이 있으면 함께 돌려준다. use_rule 은 판정에 쓸 규칙이고, null 이면 판정 보류(hold 에 이유)다.", props: { no: noParam } },
-  { name: "crosscheck", description: "같은 법안의 기준을 세 출처(우리 AI, 규칙 기반, 팀원 AI)와 비교한 자료를 보고, 뽑은 기준과 같은지 본다.", props: { no: noParam } },
+  { name: "get_bill", description: "법안 요약·위원회·제안일·단계.", props: { no: noParam } },
+  { name: "extract_criteria", description: "제안이유에서 건물 기준을 뽑아 원문 대조. use_rule = 판정에 쓸 규칙, null 이면 판정 보류.", props: { no: noParam } },
+  { name: "crosscheck", description: "기준을 세 출처와 비교한 결론 (속성별 한 줄).", props: { no: noParam } },
   {
     name: "judge_buildings",
-    description: "규칙을 시범 지역 건물 전체에 적용해 대상, 경계선, 비대상, 판정불가 동수를 센다. rule 은 extract_criteria 결과의 rule 이나 demo_rule.rule 을 그대로 넘긴다.",
+    description: "use_rule 을 그대로 넘겨 사창동 건물을 판정한다 (동수·사유·대표 사례 3건).",
     props: {
       rule: {
         type: "object",
-        description: '예: {"용도":["02000"],"연면적":{"min":1000},"층수":{"max":2},"사용승인":{"before":"1996-11-01"},"위임":["규모"]}',
+        description: "extract_criteria 의 use_rule",
         properties: {
           용도: { type: "array", items: { type: "string" } },
           연면적: { type: "object", properties: { min: { type: "number" }, max: { type: "number" } } },
@@ -106,9 +106,9 @@ const TOOLS = [
       },
     },
   },
-  { name: "draft_review", description: "지금까지 모은 결과로 담당자용 검토 초안 문단을 쓴다. 마지막에 한 번 부른다.", props: { no: noParam } },
-  { name: "classify_field", description: "팀이 직접 학습한 분야 분류 모델(TF-IDF 입력, 노트북 검증 성적이 높은 쪽: 로지스틱 회귀 또는 신경망)로 법안 제안이유의 분야(9개)를 분류하고 확률 상위 3개, 분류 확인 필요 여부, 모델 시험 정확도를 돌려준다.", props: { no: noParam } },
-  { name: "predict_pass", description: "팀이 직접 학습한 신경망이 21대 국회 처리 결과로 학습해 계산한 이 법안의 통과(가결·대안반영) 가능성과 모델 시험 성능을 돌려준다. 추정이며 법안 내용의 옳고 그름과 무관하다.", props: { no: noParam } },
+  { name: "draft_review", description: "검토 초안 작성. 마지막에 한 번.", props: { no: noParam } },
+  { name: "classify_field", description: "직접 학습한 모델로 분야 분류 (결과 한 줄).", props: { no: noParam } },
+  { name: "predict_pass", description: "직접 학습한 모델의 통과 가능성 추정 (결과 한 줄).", props: { no: noParam } },
 ].map((t) => ({
   type: "function",
   function: {
@@ -119,12 +119,10 @@ const TOOLS = [
 }));
 
 const SYSTEM = [
-  "너는 「빼곡」의 신규 법안 검토 도우미다. 지자체 담당 공무원이 법안 하나의 검토 초안을 만든다.",
-  "도구를 하나씩 골라 부른다. 보통 순서는 get_bill, classify_field, predict_pass, extract_criteria, crosscheck, judge_buildings, draft_review 이다.",
-  "classify_field 와 predict_pass 는 팀이 직접 학습한 모델이다. 결과는 추정이므로 초안에 확률과 함께 '모델 추정'이라고 쓴다.",
-  "도구를 부를 때마다 reason 에 왜 부르는지 한국어 한 문장으로 쓴다.",
-  "judge_buildings 의 rule 은 extract_criteria 결과의 use_rule 을 그대로 넘긴다. use_rule 이 null 이면(판정 보류) judge_buildings 를 부르지 말고 draft_review 로 넘어간다.",
-  "숫자와 용도 코드를 지어내지 않는다. draft_review 를 부른 뒤에는 도구를 더 부르지 말고 '끝' 이라고만 답한다.",
+  "너는 「빼곡」 법안 검토 도우미다. 도구를 하나씩 불러 검토 초안을 만든다.",
+  "순서: get_bill, classify_field, predict_pass, extract_criteria, crosscheck, judge_buildings, draft_review. reason 에 이유를 짧게 쓴다.",
+  "judge_buildings 에는 use_rule 을 그대로 넘기고, use_rule 이 null 이면 건너뛴다. 숫자를 지어내지 않는다.",
+  "draft_review 뒤에는 '끝'이라고만 답한다.",
 ].join("\n");
 
 // ---------------------------------------------------------------- 모델 (OpenAI 또는 시험용 가짜)
@@ -430,8 +428,18 @@ async function run(D, no, note, llm) {
     const J = Judge.countAll(D.props, clean);
     const top = Object.keys(J.reasons).map((k) => ({ status: k.split("|")[0], reason: k.split("|")[1], n: J.reasons[k] }))
       .sort((a, b) => b.n - a.n).slice(0, 4);
+    // 대표 사례: 대상(없으면 경계선) 건물 3동의 속성만 (주소·PNU 없음)
+    const samples = [];
+    for (const st of ["대상", "경계선"]) {
+      for (const p of D.props) {
+        if (samples.length >= 3) break;
+        const r = Judge.judge(p, clean);
+        if (r.status === st) samples.push({ status: st, 용도: Judge.useName(p.usability), 연면적: p.totalarea, 층수: p.grnd_flr, 사용승인: p.useapr_day ? String(p.useapr_day).slice(0, 4) : null });
+      }
+      if (samples.length) break;
+    }
     state.judged = { rule: clean, source: ok.source, counts: J.counts, top };
-    return { region: D.region, total: D.total, rule: clean, rule_source: ok.source, counts: J.counts, top_reasons: top };
+    return { region: D.region, total: D.total, rule: clean, rule_source: ok.source, counts: J.counts, top_reasons: top, samples };
   }
 
   // 제안이유 머리말·공백 정리 (notebooks/field_classifier.ipynb 의 clean 과 같게)
@@ -495,6 +503,26 @@ async function run(D, no, note, llm) {
     return d.length ? " · " + Criteria.NOT_IN_QUOTE + ": " + d.map((x) => x.why.replace(Criteria.NOT_IN_QUOTE, "").replace(/^\s*\(|\)\s*$/g, "")).join(", ") : "";
   }
 
+  // 대화에 다시 실리는 도구 결과는 매 단계 토큰으로 쌓이므로, 모델에게는 결론만 짧게 준다
+  function forModel(name, r) {
+    if (r.error) return { error: r.error, next: r.next };
+    if (name === "get_bill") return { no: r.no, name: r.name, committee: r.committee, stage: r.stage, summary: String(r.summary).slice(0, 400) };
+    if (name === "extract_criteria") {
+      const t = Criteria.ruleTexts(r.use_rule || {});
+      return { use_rule: r.use_rule, source: r.use_rule_source, hold: r.hold,
+        line: Object.keys(t).map((k) => k + " " + t[k]).join(", ") || "기준 없음", dropped: (r.dropped || []).length };
+    }
+    if (name === "crosscheck") {
+      return { lines: (r.items || []).map((i) => `${i.attr}: ${i.status}` + (i.note ? ` (${String(i.note).slice(0, 40)})` : "")) };
+    }
+    if (name === "judge_buildings") {
+      return { counts: r.counts, source: r.rule_source, reasons: (r.top_reasons || []).map((t) => `${t.status} ${t.reason} ${t.n}동`), samples: r.samples };
+    }
+    if (name === "classify_field" || name === "predict_pass") return { line: summarize(name, r) };
+    if (name === "draft_review") return { ok: true, chars: (r.draft || "").length };
+    return r;
+  }
+
   function summarize(name, r) {
     if (r.error) return "실행하지 않음: " + r.error;
     if (name === "get_bill") return `${r.name} · ${r.committee} · 제안 ${r.date} · 단계 ${r.stage || "정보 없음"}`;
@@ -550,7 +578,7 @@ async function run(D, no, note, llm) {
         result = TOOL_KO[name] ? await exec(name, args) : { error: "모르는 도구" };
         state.steps.push({ tool: name, tool_ko: TOOL_KO[name] || name, why: String(args.reason || "(이유를 적지 않음)").slice(0, 160), summary: summarize(name, result), ok: !result.error });
       }
-      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result).slice(0, 4000) });
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(forModel(name, result)).slice(0, 1500) });
     }
   }
 

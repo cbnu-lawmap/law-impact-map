@@ -7,13 +7,13 @@
  *   node server/scripts/compare-bill-docs.js --rules data/bill_docs   원문마다 뽑은 규칙 JSON (교차 확인용)
  *
  * 원문은 data/bill_docs/<의안번호>_원문.txt (PDF 에서 뽑은 글, 줄바꿈이 낱말 중간에 들어감).
- * 뽑기 전에 쪽 번호("- 3 -")와 대비표의 "-----" 줄을 지우고, 줄은 공백 없이 잇는다
- * (PDF 줄바꿈은 낱말 중간에서 끊기므로 "물류창\n고" → "물류창고").
+ * 원문에서는 개정 부분(criteria.js 의 amendedText: 개정문 안의 새 글만. 제안이유, 정의 조문, 부칙, 대비표는 뺌)에서만
+ * 기준을 뽑고 그 글로 대조한다 (extractFromDoc). 예전 방식(원문 전체에서 뽑기)은 비교용으로만 같이 센다.
  * 사이트의 판정 규칙(demo_rules.json)은 바꾸지 않는다. 비교만 한다.
  */
 const fs = require("fs");
 const path = require("path");
-const { extract, findDelegation } = require("../lib/criteria");
+const { extract, findDelegation, prepDocText, extractFromDoc } = require("../lib/criteria");
 
 const ROOT = path.join(__dirname, "..", "..");
 const DOCS = path.join(ROOT, "data", "bill_docs");
@@ -39,20 +39,8 @@ function readCsv(file) {
   return rows.filter((r) => r.length === head.length).map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
 }
 
-/** PDF 에서 뽑은 원문을 뽑기용 한 덩어리 글로 만든다 */
-function prepDoc(raw) {
-  return raw.split(/\r?\n/)
-    .filter((l) => !/^\s*-\s*\d+\s*-\s*$/.test(l))          // 쪽 번호
-    .map((l) => l.replace(/-{3,}/g, " ").replace(/\s+$/, "")) // 대비표의 "현행과 같음" 줄
-    .join("")
-    .replace(/\s+/g, " ").trim();
-}
-
-/** 대비표 앞까지만 (제안이유 + 개정 조문). 대비표의 "현 행" 칸은 지금 법 글이라 섞이면 안 되는 기준이 나올 수 있다 */
-function bodyOnly(raw) {
-  const i = raw.search(/신\s*[ㆍ·]\s*구\s*조\s*문\s*대\s*비\s*표/);
-  return i > 0 ? raw.slice(0, i) : raw;
-}
+/** PDF 에서 뽑은 원문을 뽑기용 한 덩어리 글로 만든다 (쪽 번호와 대비표 "-----" 를 지우고 줄을 공백 없이 잇기, criteria.js 의 prepDocText) */
+const prepDoc = prepDocText;
 
 function load() {
   const demos = JSON.parse(fs.readFileSync(path.join(ROOT, "web", "data", "demo_rules.json"), "utf8")).demos;
@@ -84,11 +72,11 @@ function agree(pilot, got) {
   return out;
 }
 
-/** --rules <폴더>: 폴더 안 모든 <의안번호>_원문.txt 에서 뽑은 규칙을 {의안번호: rule} JSON 으로 (crosscheck_criteria.py --docs 가 씀) */
+/** --rules <폴더>: 폴더 안 모든 <의안번호>_원문.txt 의 개정 부분에서 뽑은 규칙을 {의안번호: rule} JSON 으로 (crosscheck_criteria.py --docs 가 씀) */
 function dumpRules(dir) {
   const out = {};
   fs.readdirSync(dir).filter((f) => /^\d+_원문\.txt$/.test(f)).sort().forEach((f) => {
-    out[f.split("_")[0]] = extract(prepDoc(fs.readFileSync(path.join(dir, f), "utf8"))).rule;
+    out[f.split("_")[0]] = extractFromDoc(fs.readFileSync(path.join(dir, f), "utf8")).rule;
   });
   process.stdout.write(JSON.stringify(out));
 }
@@ -102,18 +90,18 @@ function main() {
     const f = path.join(DOCS, `${no}_원문.txt`);
     const raw = fs.existsSync(f) ? fs.readFileSync(f, "utf8") : "";
     const s = extract(summary[no] || "");
-    const full = raw ? extract(prepDoc(raw)) : null;
-    const body = raw ? extract(prepDoc(bodyOnly(raw))) : null;
+    const full = raw ? extractFromDoc(raw) : null;    // 개정 부분 (지금 쓰는 방식)
+    const body = raw ? extract(prepDoc(raw)) : null;  // 원문 전체 (예전 방식, 비교용)
     const rf = path.join(DOCS, `${no}_검토보고서.txt`);
     const review = fs.existsSync(rf) ? extract(prepDoc(fs.readFileSync(rf, "utf8"))) : null;
     const delegS = findDelegation(summary[no] || "").length;
-    const delegD = raw ? findDelegation(prepDoc(raw)).length : 0;
+    const delegD = raw ? findDelegation(full.text).length : 0;
     return {
       no, title: d.title, pilot: d.rule, has_doc: !!raw,
       summary: { rule: s.rule, passed: s.evidence.length, dropped: s.dropped.length, attrs: attrsOf(s.rule), delegation_phrases: delegS },
       doc: full && { rule: full.rule, passed: full.evidence.length, dropped: full.dropped.length, attrs: attrsOf(full.rule), delegation_phrases: delegD,
         evidence: full.evidence.map((e) => ({ attr: e.attr, value: e.value, quote: e.quote.slice(0, 120) })) },
-      body: body && { rule: body.rule, passed: body.evidence.length, attrs: attrsOf(body.rule) },
+      body: body && { rule: body.rule, passed: body.evidence.length, dropped: body.dropped.length, attrs: attrsOf(body.rule) },
       agree_summary: agree(d.rule, s.rule),
       agree_doc: full ? agree(d.rule, full.rule) : {},
       agree_body: body ? agree(d.rule, body.rule) : {},
@@ -126,12 +114,12 @@ function main() {
   const sum = (f) => rows.reduce((n, r) => n + f(r), 0);
   const newAttrs = (r, k) => (r[k] ? r[k].attrs.filter((a) => !r.summary.attrs.includes(a)) : []);
   console.log(`원문 있는 법안: ${rows.filter((r) => r.has_doc).length}/${rows.length}`);
-  console.log(`대조 통과 기준 수: 요약 ${sum((r) => r.summary.passed)}, 원문 전체 ${sum((r) => r.doc ? r.doc.passed : 0)}, 원문 본문(대비표 앞) ${sum((r) => r.body ? r.body.passed : 0)}`);
-  console.log(`버린 후보 수: 요약 ${sum((r) => r.summary.dropped)}, 원문 전체 ${sum((r) => r.doc ? r.doc.dropped : 0)}`);
-  console.log(`위임 문구 수(findDelegation): 요약 ${sum((r) => r.summary.delegation_phrases)}, 원문 ${sum((r) => r.doc ? r.doc.delegation_phrases : 0)}`);
-  console.log(`기준이 하나라도 뽑힌 법안: 요약 ${rows.filter((r) => r.summary.passed).length}, 원문 전체 ${rows.filter((r) => r.doc && r.doc.passed).length}, 원문 본문 ${rows.filter((r) => r.body && r.body.passed).length}`);
+  console.log(`대조 통과 기준 수: 요약 ${sum((r) => r.summary.passed)}, 원문 개정 부분 ${sum((r) => r.doc ? r.doc.passed : 0)}, 원문 전체(예전) ${sum((r) => r.body ? r.body.passed : 0)}`);
+  console.log(`버린 후보 수: 요약 ${sum((r) => r.summary.dropped)}, 원문 개정 부분 ${sum((r) => r.doc ? r.doc.dropped : 0)}, 원문 전체(예전) ${sum((r) => r.body ? r.body.dropped : 0)}`);
+  console.log(`위임 문구 수(findDelegation): 요약 ${sum((r) => r.summary.delegation_phrases)}, 원문 개정 부분 ${sum((r) => r.doc ? r.doc.delegation_phrases : 0)}`);
+  console.log(`기준이 하나라도 뽑힌 법안: 요약 ${rows.filter((r) => r.summary.passed).length}, 원문 개정 부분 ${rows.filter((r) => r.doc && r.doc.passed).length}, 원문 전체(예전) ${rows.filter((r) => r.body && r.body.passed).length}`);
   ATTRS.forEach((a) => {
-    console.log(`  ${a}: 요약 ${rows.filter((r) => r.summary.attrs.includes(a)).length}건, 원문 전체 ${rows.filter((r) => r.doc && r.doc.attrs.includes(a)).length}건, 원문 본문 ${rows.filter((r) => r.body && r.body.attrs.includes(a)).length}건, 원문에서 새로 ${rows.filter((r) => newAttrs(r, "doc").includes(a)).length}건`);
+    console.log(`  ${a}: 요약 ${rows.filter((r) => r.summary.attrs.includes(a)).length}건, 원문 개정 부분 ${rows.filter((r) => r.doc && r.doc.attrs.includes(a)).length}건, 원문 전체(예전) ${rows.filter((r) => r.body && r.body.attrs.includes(a)).length}건, 개정 부분에서 새로 ${rows.filter((r) => newAttrs(r, "doc").includes(a)).length}건`);
   });
   const tally = (k) => {
     const c = {};
@@ -139,11 +127,11 @@ function main() {
     return Object.entries(c).map(([k2, v]) => `${k2} ${v}`).join(", ");
   };
   console.log(`시범 규칙과 비교(기준 종류 수): 요약 [${tally("agree_summary")}]`);
-  console.log(`                              원문 전체 [${tally("agree_doc")}]`);
-  console.log(`                              원문 본문 [${tally("agree_body")}]`);
+  console.log(`                              원문 개정 부분 [${tally("agree_doc")}]`);
+  console.log(`                            원문 전체(예전) [${tally("agree_body")}]`);
   console.log(`검토보고서: 있는 법안 ${rows.filter((r) => r.review).length}, 대조 통과 기준 ${sum((r) => r.review ? r.review.passed : 0)}, 시범 규칙과 비교 [${tally("agree_review")}]`);
   const txt = (rule) => attrsOf(rule).map((a) => a + "=" + JSON.stringify(rule[a])).join(" ") || "-";
-  console.log("\n| 의안번호 | 시범 규칙 | 요약에서 | 원문 전체에서 | 원문 본문에서 | 원문에서 새로 |");
+  console.log("\n| 의안번호 | 시범 규칙 | 요약에서 | 원문 개정 부분에서 | 원문 전체에서(예전) | 개정 부분에서 새로 |");
   console.log("|---|---|---|---|---|---|");
   rows.forEach((r) => {
     console.log(`| ${r.no} | ${txt(r.pilot)} | ${txt(r.summary.rule)} | ${r.doc ? txt(r.doc.rule) : "(원문 없음)"} | ${r.body ? txt(r.body.rule) : "-"} | ${newAttrs(r, "doc").join("·") || "-"} |`);
@@ -151,4 +139,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { prepDoc, bodyOnly };
+module.exports = { prepDoc };

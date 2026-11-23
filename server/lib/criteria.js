@@ -207,4 +207,120 @@ function ruleTexts(rule) {
   return out;
 }
 
-module.exports = { NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts };
+// ---------------------------------------------------------------- 의안 원문에서 "개정 부분"만 고르기
+/*
+ * 의안 원문(PDF 에서 뽑은 글)에는 제안이유, 개정문, 부칙, 신·구조문대비표가 다 들어 있다.
+ * 제안이유는 지금 법 설명이 섞이고, 대비표는 PDF 글에서 "현 행" 칸과 "개 정 안" 칸이 섞여 나와 칸별로 믿을 수 없다.
+ * 그래서 원문에서 기준을 뽑을 때는 개정문("…일부를 다음과 같이 개정한다." 다음부터 부칙 또는 대비표 앞까지)에서
+ * 새로 들어가는 글만 쓴다.
+ *   - 제N조 … 중 "A"를 "B"로 한다          → B 만 (A 는 지금 법 글)
+ *   - … 다음과 같이 신설한다 / 다음과 같이 한다 → 그 뒤에 오는 새 글
+ *   - 정의 조문(제2조, 제목에 "정의"가 든 조)을 고치는 것 → 뺀다
+ * 개정문을 못 찾으면 "" 를 돌려준다 (원문 전체로 대신하지 않는다).
+ */
+
+/** PDF 에서 뽑은 원문을 한 덩어리 글로: 쪽 번호("- 3 -")와 대비표의 "-----" 를 지우고 줄은 공백 없이 잇는다 (PDF 줄바꿈은 낱말 중간에서 끊김) */
+function prepDocText(raw) {
+  return String(raw || "").split(/\r?\n/)
+    .filter((l) => !/^\s*-\s*\d+\s*-\s*$/.test(l))
+    .map((l) => l.replace(/-{3,}/g, " ").replace(/\s+$/, ""))
+    .join("")
+    .replace(/\s+/g, " ").trim();
+}
+
+const AMEND_START = /다음과\s*같이\s*개정한다\s*\./;
+const AMEND_END = /부\s*칙|신\s*[ㆍ·]\s*구\s*조\s*문\s*대\s*비\s*표/;
+// 따옴표 글 하나 (안에 따옴표가 한 겹 더 있어도 됨: “건축물(이하 “공공건축물”이라 한다)”)
+const QUOTED = "“(?:[^“”]|“[^”]*”)*”";
+// 개정 지시문: 제N조(…)로 시작해 "…로 한다." / "…신설한다." / "…같이 한다." / "…삭제한다." 로 끝나는 한 문장.
+// 따옴표 밖에는 마침표가 없다. "제45조의17에 따른" 처럼 다른 법 조문을 가리키는 말은 지시문 시작이 아니다
+const INSTR = new RegExp(
+  "(?:제\\d+장(?:제\\d+절)?에\\s*)?제\\d+조(?:의\\d+)?(?![\\d(]|의\\d)(?!(?:제\\d+[항호목](?:의\\d+)?)*\\s*(?:에\\s*)?(?:따른|따라|의한|의하여|관한|해당|규정))" +
+  "(?:[^.“”]|" + QUOTED + ")*?(?:로|신설|같이|삭제)\\s*한다\\.", "g");
+const PAIR = new RegExp("(" + QUOTED + ")\\s*(?:을|를)\\s*(" + QUOTED + ")\\s*(?:으로|로)", "g");
+const INSTR_VERB = /중\s*“|다음과\s*같이|각각|삭제|(?:을|를)\s*제\d+/;
+
+/** 원문 어디서든(대비표 제목 포함) "제N조(…정의…)" 꼴로 나온 조 번호 */
+function definitionArticles(text) {
+  const out = new Set(["2"]); // 법률의 제2조는 거의 언제나 정의 조문
+  const re = /제(\d+)조(의\d+)?\s*\(([^)]{0,40})\)/g;
+  let m;
+  while ((m = re.exec(text))) if (/정의/.test(m[3])) out.add(m[1] + (m[2] || ""));
+  return out;
+}
+function targetArticle(instr) {
+  const m = /제(\d+)조(의\d+)?/.exec(instr);
+  return m ? m[1] + (m[2] || "") : "";
+}
+// 새로 넣는 조 글의 제목이 정의인지: "제12조의2(정의) …"
+function isDefinitionText(t) { return /^제\d+조(?:의\d+)?\s*\([^)]*정의[^)]*\)/.test(t); }
+
+/**
+ * 의안 원문 → 기준 근거로 받아 줄 "개정 부분" 글. 고친 뒤 들어가는 글(B, 신설 글, 바꾸는 글)만 ". " 로 이어 붙인다.
+ * 개정문이 없으면 "".
+ */
+function amendedText(raw) {
+  const text = /\n/.test(String(raw || "")) ? prepDocText(raw) : normText(raw);
+  const s = AMEND_START.exec(text);
+  if (!s) return "";
+  const from = s.index + s[0].length;
+  const rest = text.slice(from);
+  const e = rest.search(AMEND_END);
+  const body = e >= 0 ? rest.slice(0, e) : rest;
+  const defs = definitionArticles(text);
+
+  // 지시문을 차례로 찾는다. 따옴표 밖 지시 낱말(중 “ / 다음과 같이 / 각각 / 삭제)이 없으면 지시문이 아니다
+  const instrs = [];
+  INSTR.lastIndex = 0;
+  let m;
+  while ((m = INSTR.exec(body))) {
+    const bare = m[0].replace(new RegExp(QUOTED, "g"), "“”");
+    if (!INSTR_VERB.test(bare) || /^제\d+조(?:의\d+)?\s*\(/.test(m[0])) { INSTR.lastIndex = m.index + 1; continue; }
+    instrs.push({ start: m.index, end: m.index + m[0].length, text: m[0] });
+  }
+  const pieces = [];
+  instrs.forEach((ins, i) => {
+    const art = targetArticle(ins.text);
+    if (defs.has(art)) return; // 정의 조문을 고치는 것은 통째로 뺀다
+    let p;
+    PAIR.lastIndex = 0;
+    while ((p = PAIR.exec(ins.text))) pieces.push(p[2].slice(1, -1)); // B 만
+    if (/다음과\s*같이/.test(ins.text.replace(new RegExp(QUOTED, "g"), "“”"))) {
+      const next = i + 1 < instrs.length ? instrs[i + 1].start : body.length;
+      const added = body.slice(ins.end, next).trim();
+      if (added && !isDefinitionText(added)) pieces.push(added);
+    }
+  });
+  return pieces.map((t) => normText(t).replace(/\.$/, "")).filter(Boolean).join(". ").concat(pieces.length ? "." : "");
+}
+
+const AMBIGUOUS = "개정 부분에 같은 기준의 수치가 여럿 (각 호 중 하나의 조건일 수 있어 버림)";
+
+/**
+ * 의안 원문에서 기준 뽑기: 개정 부분 글(amendedText)에서만 뽑고 그 글로 대조한다.
+ * 개정 부분에서 같은 기준(연면적 이상 등)의 수치가 둘 이상 다르게 나오면 ("다음 각 호의 어느 하나" 목록 등)
+ * 어느 것이 대상 기준인지 알 수 없으므로 그 기준은 버린다.
+ */
+function extractFromDoc(raw) {
+  const text = amendedText(raw);
+  if (!text) return { text, rule: {}, evidence: [], dropped: [] };
+  const cands = extractCandidates(text);
+  const vals = {};
+  cands.forEach((c) => {
+    if (c.attr !== "연면적" && c.attr !== "층수") return;
+    const k = c.attr + "|" + c.bound;
+    (vals[k] = vals[k] || new Set()).add(c.value);
+  });
+  const amb = new Set(Object.keys(vals).filter((k) => vals[k].size > 1));
+  const dropped0 = [];
+  const kept = cands.filter((c) => {
+    if (!amb.has(c.attr + "|" + c.bound)) return true;
+    dropped0.push({ attr: c.attr, value: c.value, why: AMBIGUOUS });
+    return false;
+  });
+  const r = verify(kept, text);
+  return { text, rule: r.rule, evidence: r.evidence, dropped: dropped0.concat(r.dropped) };
+}
+
+module.exports = { NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
+  prepDocText, amendedText, extractFromDoc };
