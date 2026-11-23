@@ -4,7 +4,8 @@
 
   web/data/buildings.geojson  사창동 건물 (판정용 속성 6개만, 좌표 소수 6자리)
                               값 출처 순서: ① 브이월드 건물통합정보 → ② 건축물대장 표제부
-                              (data/bldg_register_사창동.csv, 있을 때만. 필지에 대장 한 줄·건물 한 동이면 대장 값 우선, 바꾼 속성 이름을 reg 에 남김)
+                              (data/bldg_register_사창동.csv, 있을 때만. 필지에 대장 한 줄·건물 한 동이면 대장 값 우선, 바꾼 속성 이름을 reg 에 남김.
+                              세대수 hhld_cnt 는 대장에만 있어 이렇게 맞춘 건물에만 붙음)
                               → ③ 그래도 빈 속성에만 신경망 추정 est_area·est_area_p (연면적),
                               est_year·est_year_p (사용승인 연대), est_flr·est_p (지상층수). 추정은 참고용, 판정에 안 씀
   web/data/boundary.geojson   사창동 행정동 경계
@@ -94,7 +95,11 @@ def judge(p, rule):
     near = False
     if "용도" in rule and p["usability"] not in rule["용도"]:
         return "비대상"
-    for k, attr in (("연면적", "totalarea"), ("층수", "grnd_flr")):
+    # 세대수는 건축물대장 표제부를 맞춘 건물에만 있어(브이월드에 없음) 용도를 먼저 본다.
+    # 비었거나 0 이면 판정불가 (공동주택 0 은 미기재, 단독주택은 대부분 0 이라 실제 값으로 믿지 않음)
+    if "세대수" in rule and empty(p.get("hhld_cnt")):
+        return "판정불가"
+    for k, attr in (("연면적", "totalarea"), ("층수", "grnd_flr"), ("세대수", "hhld_cnt")):
         if k not in rule:
             continue
         v, r = float(p[attr]), rule[k]
@@ -189,6 +194,16 @@ AI_RULES = [
         "rule": {"용도": ["01000", "02000"], "연면적": {"max": 85}},
         "rule_note": "주거용 건축물 → 주용도 01000(단독주택)·02000(공동주택). 위반건축물 여부는 자료에 없으므로 '위반이 있으면 감경 대상이 되는 건물' 수임",
         "subject": "연면적 85㎡ 이하 주택",
+    },
+    {
+        "bill_no": "2207658",
+        "title": "주택법 개정안: 품질점검단 점검대상 30세대 이상 공동주택",
+        "source_text": "품질점검단의 점검대상을 30세대 이상 공동주택으로 확대하는 한편",
+        "rule": {"용도": ["02000"], "세대수": {"min": 30}},
+        "rule_note": "공동주택 → 주용도 02000, 세대수는 건축물대장 표제부(동별) 값. 법안 기준은 단지(사업) 전체 세대수라 "
+                     "여러 동 단지의 한 동은 30세대 미만으로 나와 비대상이 될 수 있음. 세대수가 비었거나 0 이면 판정불가. "
+                     "점검은 사용검사 전 신축 단지에 하므로 기존 건물은 '같은 규모로 새로 지으면 대상'이라는 뜻",
+        "subject": "30세대 이상 공동주택",
     },
     {
         "bill_no": "2200958",
@@ -377,7 +392,7 @@ def check_source(d, summary):
     if src not in norm_text(summary):
         raise ValueError(f"[{d['bill_no']}] source_text 가 법안 요약 원문에 없음: {src}")
     rule = d["rule"]
-    for k in ("연면적", "층수"):
+    for k in ("연면적", "층수", "세대수"):
         for b in ("min", "max"):
             if k in rule and b in rule[k]:
                 v = rule[k][b]
@@ -446,9 +461,11 @@ def load_estimates(features):
 
 # 건축물대장 표제부 (공공데이터포털, collect/collect_register.py 가 받음). 없으면 아무것도 바꾸지 않는다.
 REGISTER = os.path.join(DATA, f"bldg_register_{EMD}.csv")
-# 건물 속성 ← 표제부 열 이름 (우리 이름, API 이름). 세대수(hhld_cnt)는 아직 판정 규칙에 없어 쓰지 않는다
+# 건물 속성 ← 표제부 열 이름 (우리 이름, API 이름). 세대수(hhld_cnt)는 브이월드에 없어 맞춘 건물에만 생긴다.
+# 표제부 세대수는 동별 값이라 단지 전체 세대수 기준보다 작게 나올 수 있다 (docs/bldg_register_analysis.md)
 REG_COLS = {"totalarea": ("totalarea", "totArea"), "useapr_day": ("useapr_day", "useAprDay"),
-            "grnd_flr": ("grnd_flr", "grndFlrCnt"), "usability": ("main_purps_cd", "mainPurpsCd")}
+            "grnd_flr": ("grnd_flr", "grndFlrCnt"), "usability": ("main_purps_cd", "mainPurpsCd"),
+            "hhld_cnt": ("hhld_cnt", "hhldCnt")}
 
 
 def reg_value(attr, v):
@@ -459,7 +476,7 @@ def reg_value(attr, v):
     try:
         if attr == "totalarea":
             return round(float(v), 2) or None
-        if attr == "grnd_flr":
+        if attr in ("grnd_flr", "hhld_cnt"):
             return int(float(v)) or None
     except ValueError:
         return None

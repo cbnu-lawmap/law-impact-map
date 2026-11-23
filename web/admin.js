@@ -249,10 +249,10 @@
   function ruleText(rule) {
     var out = [];
     if (rule.용도) out.push("주용도: " + rule.용도.map(useName).join(", "));
-    ["연면적", "층수"].forEach(function (k) {
+    ["연면적", "층수", "세대수"].forEach(function (k) {
       var r = rule[k];
       if (!r) return;
-      var unit = k === "연면적" ? "㎡" : "층";
+      var unit = { 연면적: "㎡", 층수: "층", 세대수: "세대" }[k];
       if (r.min !== undefined) out.push(k + " " + fmt(r.min) + unit + " 이상");
       if (r.max !== undefined) out.push(k + " " + fmt(r.max) + unit + " 이하");
     });

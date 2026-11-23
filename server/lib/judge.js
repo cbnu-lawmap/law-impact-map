@@ -3,7 +3,8 @@
  * 빼곡 — 건물 판정 로직
  *
  * 규칙 형식
- *   { 용도: ["08000"], 연면적: {min, max}, 층수: {min}, 사용승인: {before: "1990-01-01"}, 위임: ["용도"] }
+ *   { 용도: ["08000"], 연면적: {min, max}, 층수: {min}, 세대수: {min}, 사용승인: {before: "1990-01-01"}, 위임: ["용도"] }
+ *   - 세대수: 건축물대장 표제부(동별) 값 hhld_cnt. 맞춘 건물에만 있어 용도를 먼저 보고, 비었거나 0 이면 판정불가
  *   - 위임: 법률이 시행령에 넘긴 기준. 나머지 기준을 충족해도 확정할 수 없으므로 판정불가
  *
  * 판정 4단계
@@ -52,6 +53,7 @@
   var NEAR_YEARS = 1;
   var STATUSES = ["대상", "경계선", "비대상", "판정불가"];
   var ATTR = { 용도: "usability", 연면적: "totalarea", 층수: "grnd_flr", 사용승인: "useapr_day" };
+  var NUM_ATTR = { 연면적: "totalarea", 층수: "grnd_flr", 세대수: "hhld_cnt" };
 
   function isEmpty(v) {
     return v === null || v === undefined || v === "" || v === 0;
@@ -70,13 +72,17 @@
     if (rule.용도 && rule.용도.indexOf(p.usability) < 0) {
       return { status: "비대상", reason: "용도 불일치" };
     }
+    // 세대수는 표제부를 맞춘 건물에만 있으므로 용도를 먼저 본 뒤 비었는지 본다
+    if (rule.세대수 && isEmpty(p.hhld_cnt)) {
+      return { status: "판정불가", reason: "속성 없음(세대수)" };
+    }
 
-    var nums = ["연면적", "층수"];
+    var nums = ["연면적", "층수", "세대수"];
     for (var i = 0; i < nums.length; i++) {
       k = nums[i];
       var r = rule[k];
       if (!r) continue;
-      var v = Number(p[ATTR[k]]);
+      var v = Number(p[NUM_ATTR[k]]);
       if (r.min !== undefined && v < r.min) {
         if (v >= r.min * (1 - NEAR_RATIO)) near = true;
         else return { status: "비대상", reason: k + " 미달" };
