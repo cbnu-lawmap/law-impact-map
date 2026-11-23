@@ -14,7 +14,7 @@
  * 열쇠 값은 코드나 결과 파일에 남기지 않는다.
  *
  * 지표 (방식별)
- *   원문 대조 통과 기준 수   extraction.rule 의 기준 수 합 (용도·연면적·층수·사용승인·위임)
+ *   원문 대조 통과 기준 수   extraction.rule 의 기준 수 합 (용도·연면적·층수·세대수·사용승인·위임)
  *   시범 규칙 일치 수        extraction.rule 이 demo_rules.json 의 규칙과 똑같은 법안 수 (시범 규칙으로 대신 판정한 것은 세지 않음)
  *   평균 토큰, 평균 단계 수  응답의 tokens, step_count (단계 기록 수, 자동 계산·코드 평가 단계 포함)
  *   재검색으로 살린 법안     요약에서 부족했던 기준이 나중 출처에서 판정에 충분이 된 법안 (응답의 revived)
@@ -36,7 +36,7 @@ const ADDED_LATER = ["2207658"]; // 처음 26건 뒤에 넣은 시범 법안
 
 const demos = JSON.parse(fs.readFileSync(path.join(ROOT, "web", "data", "demo_rules.json"), "utf8")).demos;
 const pilots = demos.filter((d) => opt("bills", "27") !== "26" || !ADDED_LATER.includes(d.bill_no));
-const KEYS = ["용도", "연면적", "층수", "사용승인", "위임"];
+const KEYS = ["용도", "연면적", "층수", "세대수", "사용승인", "위임"];
 function canon(rule) {
   const out = {};
   KEYS.forEach((k) => {

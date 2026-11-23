@@ -1,0 +1,57 @@
+name: Tests
+
+# PR 과 main push 마다 도는 빠른 시험 (5분 안). 작업 이름(server-test, python-test)은 필수 검사로 쓰므로 바꾸지 않는다.
+#   server-test  server/ 의 npm test (판정·TF-IDF 복사본 일치, 원문 대조, 에이전트 흐름, 비슷한 법안 … 네트워크·키 없이)
+#   python-test  collect/ 의 시험 스크립트와 tests/ (파이썬 판정 = demo_rules.json 동수), TF-IDF 비교 숫자 확인
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-test:
+    name: server-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: npm test
+        working-directory: server
+        run: |
+          npm ci || npm install
+          npm test
+
+  python-test:
+    name: python-test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -r collect/requirements.txt pandas scikit-learn numpy
+      - name: Tests
+        run: |
+          python tests/test_judge.py
+          python collect/test_collect_register.py
+          python collect/test_crosscheck.py
+          python collect/test_http_retry.py
+      # 임베딩 없이 TF-IDF 비교만 (문서는 쓰지 않음). compare_similar.py 가 깨지지 않았는지 확인
+      - name: TF-IDF comparison check
+        run: python collect/compare_similar.py --tfidf-only

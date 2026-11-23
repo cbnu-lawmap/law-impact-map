@@ -1,18 +1,26 @@
 name: Bill embeddings (pgvector)
 
-# 법안 요약문 임베딩을 Supabase bill_embeddings 표에 넣고(새·바뀐 법안만),
-# 단어 유사도(TF-IDF)와 의미 검색(임베딩)의 "같은 법률 법안 찾기" 비교 결과를 docs/similar_compare.md 로 남긴다.
-# 매일 법안 수집(06:30) 뒤 07:30 에 돌고, 손으로도 돌릴 수 있다.
-# PR 에서는 DB 에 넣지 않고 비교만 해서 결과 문서를 PR 브랜치에 커밋한다 (로컬 윈도우에서 torch 가 막혀도 숫자를 코드로 만들기 위함).
-# (daily-collect 가 GITHUB_TOKEN 으로 올린 커밋은 push 트리거를 깨우지 않으므로 시간 트리거를 둔다)
+# 법안 제안이유 전문(web/data/summaries.json) 임베딩을 Supabase bill_embeddings 표에 넣고(새 법안과 글이 바뀐 법안만, text_hash 로 판단),
+# 단어 유사도(TF-IDF)·의미 검색(임베딩)·둘의 결합(RRF)의 "같은 법률 법안 찾기" 비교 결과를 docs/similar_compare.md 로,
+# 서버가 쓸 기본 방법을 web/data/similar_method.json 으로 남긴다 (collect/compare_similar.py 가 코드로 정함).
+#
+# 언제 도나
+#   - 매일 법안 수집(daily-collect.yml)이 끝나면 workflow_run 으로 (그 워크플로가 GITHUB_TOKEN 으로 올린 커밋은
+#     push 트리거를 깨우지 않으므로 완료 이벤트로 잇는다. 성공했을 때만)
+#   - main 에 summaries.json·스크립트가 바뀌어 올라오면 (사람이 올린 push)
+#   - PR: DB 에 넣지 않고 비교만 해서 결과를 PR 브랜치에 커밋 (로컬 윈도우에서 torch 가 막혀도 숫자를 코드로 만들기 위함)
+#   - 손으로 (workflow_dispatch). main 이 아닌 브랜치에서 돌리면 DB 에 넣지 않고 결과만 그 브랜치에 커밋
+# main 에서 similar_method.json 이 바뀌면 Pages 를 다시 배포한다 (서버가 배포본의 data/ 를 읽으므로)
 #
 # secrets
 #   SUPABASE_SERVICE_ROLE_KEY  없으면 DB 에 넣는 단계만 건너뛴다 (비교는 그대로 함)
 #   SUPABASE_URL               선택. 없으면 시연 프로젝트 주소 (collect/embed_bills.py 의 DEFAULT_URL)
 
 on:
-  schedule:
-    - cron: "30 22 * * *"   # 매일 07:30 (한국 시간)
+  workflow_run:
+    workflows: ["Daily bill collection"]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
     inputs:
       all:
@@ -38,9 +46,16 @@ concurrency:
 
 jobs:
   embed:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      deploy: ${{ steps.commit.outputs.deploy }}
+      sha: ${{ steps.commit.outputs.sha }}
+    env:
+      # 결과를 커밋할 브랜치: PR 이면 PR 브랜치, 손으로 돌리면 그 브랜치, 나머지(workflow_run·push)는 main
+      TARGET: ${{ github.event_name == 'pull_request' && github.head_ref || github.event_name == 'workflow_dispatch' && github.ref_name || 'main' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,31 +78,47 @@ jobs:
           path: ~/.cache/huggingface
           key: hf-paraphrase-multilingual-MiniLM-L12-v2
 
-      # 키 값은 출력하지 않는다. 키가 없으면 embed_bills.py 가 DB 단계만 건너뛴다
+      # 키 값은 출력하지 않는다. 키가 없으면 embed_bills.py 가 DB 단계만 건너뛴다. main 이 아니면 DB 에 넣지 않는다
       - name: Embed and upsert
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           PYTHONUTF8: "1"
         run: |
-          python collect/embed_bills.py --save "$RUNNER_TEMP/emb.npz" ${{ inputs.all && '--all' || '' }} ${{ github.event_name == 'pull_request' && '--no-upload' || '' }}
+          python collect/embed_bills.py --save "$RUNNER_TEMP/emb.npz" ${{ inputs.all && '--all' || '' }} ${{ env.TARGET != 'main' && '--no-upload' || '' }}
 
-      - name: Compare TF-IDF vs embeddings
+      - name: Compare TF-IDF vs embeddings vs RRF
         env:
           PYTHONUTF8: "1"
         run: python collect/compare_similar.py --emb "$RUNNER_TEMP/emb.npz"
 
-      # main(시간·push·수동) 이면 main 에, PR 이면 PR 브랜치에 커밋한다. 다른 브랜치 수동 실행은 커밋하지 않는다
       - name: Commit comparison if changed
-        if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.ref == 'refs/heads/main'
-        env:
-          TARGET: ${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+        id: commit
         run: |
           git config core.autocrlf input
-          git add docs/similar_compare.md
+          git add docs/similar_compare.md web/data/similar_method.json
           if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          method_changed=false
+          git diff --cached --quiet -- web/data/similar_method.json || method_changed=true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs: 비슷한 법안 비교 결과 갱신 (TF-IDF vs 임베딩) [skip ci]"
+          git commit -m "docs: 비슷한 법안 비교 결과 갱신 (TF-IDF vs 임베딩 vs RRF) [skip ci]"
           git pull --rebase origin "$TARGET"
           git push origin "HEAD:$TARGET"
+          if [ "$TARGET" = "main" ] && [ "$method_changed" = "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+  # 서버는 배포본(GitHub Pages)의 data/similar_method.json 을 읽으므로, main 에서 바뀌었으면 다시 배포한다
+  deploy:
+    needs: embed
+    if: needs.embed.outputs.deploy == 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/pages.yml
+    with:
+      ref: ${{ needs.embed.outputs.sha }}
+    secrets: inherit

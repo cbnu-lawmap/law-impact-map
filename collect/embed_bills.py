@@ -68,6 +68,13 @@ def load_docs():
     return out
 
 
+def count_full(docs):
+    """제안이유 전문(summaries.json)으로 만든 법안 수"""
+    p = WEB / "summaries.json"
+    full = json.loads(p.read_text(encoding="utf-8")).get("summaries", {}) if p.exists() else {}
+    return sum(1 for no, _, _ in docs if (full.get(no) or "").strip())
+
+
 def text_hash(text):
     return hashlib.sha256((MODEL + "\n" + text).encode("utf-8")).hexdigest()
 
@@ -122,7 +129,7 @@ def main():
     args = ap.parse_args()
 
     docs = load_docs()
-    print(f"법안 {len(docs)}건 (요약문 있는 것)")
+    print(f"법안 {len(docs)}건 (요약문 있는 것), 그중 제안이유 전문이 없어 300자 요약을 쓴 법안 {len(docs) - count_full(docs)}건")
     key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "").strip()
     url = os.environ.get("SUPABASE_URL", "").strip() or DEFAULT_URL
     upload = not args.no_upload
@@ -137,9 +144,12 @@ def main():
         rest = Rest(url, key)
         have, has_hash = rest.existing()
         if not args.all:
+            # 표에 없는 법안 + 해시가 다른 법안 (예: 전문이 없어 300자 요약으로 넣었다가 summaries.json 에 전문이 생긴 법안)
             todo = [i for i, (no, _, t) in enumerate(docs)
                     if no not in have or (has_hash and have[no] != text_hash(t))]
-        print(f"DB 에 있는 법안 {len(have)}건, 넣을 법안 {len(todo)}건" + ("" if has_hash else " (text_hash 열 없음: 없는 법안만)"))
+        changed = sum(1 for i in todo if docs[i][0] in have)
+        print(f"DB 에 있는 법안 {len(have)}건, 넣을 법안 {len(todo)}건 (새 법안 {len(todo) - changed}, 글이 바뀐 법안 {changed})"
+              + ("" if has_hash else " (text_hash 열 없음: 없는 법안만)"))
 
     need = range(len(docs)) if args.save else todo
     if not need:

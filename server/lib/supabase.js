@@ -48,4 +48,35 @@ async function sbPost(path, body, opts) {
   }
 }
 
-module.exports = { sbEnv, sbPost };
+/**
+ * POST {url}/rest/v1/rpc/{fn} (서비스 키만). 실패해도 예외를 던지지 않고 이유를 돌려준다.
+ *   성공: { ok: true, status, json }
+ *   실패: { ok: false, status, code, message }  status 0 = 키 없음, -1 = 연결 실패·시간 초과
+ * DB 함수가 raise exception 으로 거절하면 status 400, code P0001 과 그 문구(message)가 온다.
+ */
+async function sbRpc(fn, args, opts) {
+  opts = opts || {};
+  const env = sbEnv();
+  if (!env) return { ok: false, status: 0, message: "키 없음" };
+  const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), opts.timeoutMs || 5000) : null;
+  try {
+    const r = await fetch(env.url + "/rest/v1/rpc/" + fn, {
+      method: "POST",
+      headers: { apikey: env.key, Authorization: "Bearer " + env.key, "Content-Type": "application/json" },
+      body: JSON.stringify(args || {}),
+      signal: ctl ? ctl.signal : undefined,
+    });
+    const text = await r.text();
+    let json = null;
+    try { json = text ? JSON.parse(text) : null; } catch (e) { json = null; }
+    if (!r.ok) return { ok: false, status: r.status, code: String((json && json.code) || ""), message: String((json && json.message) || "").slice(0, 120) };
+    return { ok: true, status: r.status, json };
+  } catch (e) {
+    return { ok: false, status: -1, message: "연결 실패" };
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+module.exports = { sbEnv, sbPost, sbRpc };

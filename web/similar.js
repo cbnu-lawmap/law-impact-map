@@ -1,7 +1,8 @@
 /*
  * 빼곡 — 법안 상세의 "비슷한 법안" · "비슷한 판정 법안"
  *
- * 서버(/api/similar)가 의미 검색(pgvector) 또는 단어 유사도(TF-IDF, 요약문 전문)로 찾아 준다.
+ * 서버(/api/similar)가 단어 유사도(TF-IDF, 요약문 전문) 또는 단어 + 의미 결합(TF-IDF 와 pgvector 순위의 RRF)으로 찾아 준다.
+ * 어느 방법을 쓸지는 collect/compare_similar.py 의 측정 결과(web/data/similar_method.json)로 서버가 정한다.
  * 질의 도우미(AI)를 꺼서 외부 서버에 연결하지 않거나 서버가 답하지 않으면,
  * 화면이 이미 가진 법안 요약(앞부분)으로 같은 TF-IDF 계산(web/tfidf.js)을 해서 보여 준다.
  * 어느 방법으로 찾았는지 늘 함께 표시한다.
@@ -9,7 +10,11 @@
 (function () {
   "use strict";
 
-  var LABEL = { pgvector: "의미 검색(pgvector)", tfidf: "단어 유사도(TF-IDF)" };
+  var LABEL = { hybrid: "단어 + 의미 결합(RRF)", pgvector: "의미 검색(pgvector)", tfidf: "단어 유사도(TF-IDF)" };
+  var TIP = {
+    hybrid: "단어 유사도(TF-IDF) 순위와 법안 요약문 임베딩(paraphrase-multilingual-MiniLM-L12-v2) 순위를 RRF 로 합침. 유사도 숫자는 TF-IDF 코사인",
+    pgvector: "법안 요약문 임베딩(paraphrase-multilingual-MiniLM-L12-v2)의 코사인 유사도",
+  };
   var local = null; // 화면 안 TF-IDF 색인 (처음 쓸 때 한 번 만든다)
   var apiDown = false; // 서버가 한 번 답하지 않으면 이 화면에서는 다시 묻지 않는다
 
@@ -47,8 +52,8 @@
     }).join("") + "</ul>";
   }
   function methodTag(r) {
-    return '<span class="tag' + (r.method === "pgvector" ? " done" : "") + '" title="' +
-      (r.method === "pgvector" ? "법안 요약문 임베딩(paraphrase-multilingual-MiniLM-L12-v2)의 코사인 유사도" :
+    return '<span class="tag' + (TIP[r.method] ? " done" : "") + '" title="' +
+      (TIP[r.method] ? TIP[r.method] :
         r.local ? "서버에 연결하지 않아 화면이 가진 요약 앞부분으로 계산" : "요약문 전문의 글자 2~3개 묶음 TF-IDF 코사인 유사도") + '">' +
       esc(r.label || LABEL[r.method] || r.method) + (r.local ? " · 요약 앞부분" : "") + "</span>";
   }

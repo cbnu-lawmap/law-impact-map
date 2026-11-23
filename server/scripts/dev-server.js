@@ -10,7 +10,7 @@
  */
 const http = require("http");
 
-const ROUTES = { "/api/agent": require("../api/agent"), "/api/ask": require("../api/ask"), "/api/similar": require("../api/similar") };
+const ROUTES = { "/api/agent": require("../api/agent"), "/api/ask": require("../api/ask"), "/api/similar": require("../api/similar"), "/api/progress": require("../api/progress") };
 const PORT = Number(process.env.PORT || 3000);
 
 http.createServer((req, res) => {
