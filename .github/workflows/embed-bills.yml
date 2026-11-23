@@ -1,0 +1,93 @@
+name: Bill embeddings (pgvector)
+
+# 법안 요약문 임베딩을 Supabase bill_embeddings 표에 넣고(새·바뀐 법안만),
+# 단어 유사도(TF-IDF)와 의미 검색(임베딩)의 "같은 법률 법안 찾기" 비교 결과를 docs/similar_compare.md 로 남긴다.
+# 매일 법안 수집(06:30) 뒤 07:30 에 돌고, 손으로도 돌릴 수 있다.
+# PR 에서는 DB 에 넣지 않고 비교만 해서 결과 문서를 PR 브랜치에 커밋한다 (로컬 윈도우에서 torch 가 막혀도 숫자를 코드로 만들기 위함).
+# (daily-collect 가 GITHUB_TOKEN 으로 올린 커밋은 push 트리거를 깨우지 않으므로 시간 트리거를 둔다)
+#
+# secrets
+#   SUPABASE_SERVICE_ROLE_KEY  없으면 DB 에 넣는 단계만 건너뛴다 (비교는 그대로 함)
+#   SUPABASE_URL               선택. 없으면 시연 프로젝트 주소 (collect/embed_bills.py 의 DEFAULT_URL)
+
+on:
+  schedule:
+    - cron: "30 22 * * *"   # 매일 07:30 (한국 시간)
+  workflow_dispatch:
+    inputs:
+      all:
+        description: "이미 있는 법안도 전부 다시 넣기"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - "web/data/summaries.json"
+      - "collect/embed_bills.py"
+      - "collect/compare_similar.py"
+      - ".github/workflows/embed-bills.yml"
+  pull_request:
+    paths:
+      - "collect/embed_bills.py"
+      - "collect/compare_similar.py"
+      - ".github/workflows/embed-bills.yml"
+
+concurrency:
+  group: embed-bills
+  cancel-in-progress: false
+
+jobs:
+  embed:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.event_name == 'workflow_dispatch' && github.ref || 'main' }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      # CPU 용 torch 를 먼저 받아 설치 크기를 줄인다
+      - name: Install
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r collect/requirements.txt sentence-transformers scikit-learn numpy
+
+      - name: Cache model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-paraphrase-multilingual-MiniLM-L12-v2
+
+      # 키 값은 출력하지 않는다. 키가 없으면 embed_bills.py 가 DB 단계만 건너뛴다
+      - name: Embed and upsert
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          PYTHONUTF8: "1"
+        run: |
+          python collect/embed_bills.py --save "$RUNNER_TEMP/emb.npz" ${{ inputs.all && '--all' || '' }} ${{ github.event_name == 'pull_request' && '--no-upload' || '' }}
+
+      - name: Compare TF-IDF vs embeddings
+        env:
+          PYTHONUTF8: "1"
+        run: python collect/compare_similar.py --emb "$RUNNER_TEMP/emb.npz"
+
+      # main(시간·push·수동) 이면 main 에, PR 이면 PR 브랜치에 커밋한다. 다른 브랜치 수동 실행은 커밋하지 않는다
+      - name: Commit comparison if changed
+        if: github.event_name == 'pull_request' || github.event_name == 'schedule' || github.ref == 'refs/heads/main'
+        env:
+          TARGET: ${{ github.event_name == 'pull_request' && github.head_ref || 'main' }}
+        run: |
+          git config core.autocrlf input
+          git add docs/similar_compare.md
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "docs: 비슷한 법안 비교 결과 갱신 (TF-IDF vs 임베딩) [skip ci]"
+          git pull --rebase origin "$TARGET"
+          git push origin "HEAD:$TARGET"

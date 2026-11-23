@@ -99,27 +99,48 @@ flowchart LR
   D --> W2[web/admin.html<br/>행정 화면]
   J[web/judge.js<br/>판정 규칙 공용] --> W1 & W2
   J -. 같은 로직 .-> S2
-  subgraph server["server/ (Vercel ppaegok-api, OpenAI 키는 여기만)"]
+  subgraph server["server/ (Vercel ppaegok-api, OpenAI 키·Supabase 서비스 키는 여기만)"]
     S1[api/ask.js<br/>질의 도우미]
     S2[api/agent.js<br/>검토 에이전트]
+    S3[api/similar.js<br/>비슷한 법안]
   end
   W2 -- 질문 --> S1
   W2 -- 검토 초안 요청 --> S2
-  D -. 공개 데이터 읽기 .-> S1 & S2
+  W2 -- 비슷한 법안 --> S3
+  D -. 공개 데이터 읽기 .-> S1 & S2 & S3
+  subgraph supa["Supabase (시연용 클라우드 DB, 도입 시 기관 내부 DB로 교체) · 모든 표 RLS"]
+    P1[(review_progress · review_log<br/>members 역할)]
+    P2[(bill_embeddings<br/>pgvector 384차원)]
+    P3[(agent_runs)]
+  end
+  W2 -- "로그인·진행 공유·결재<br/>(공개 키 + 이메일 링크)" --> P1
+  E1[embed_bills.py<br/>Actions embed-bills.yml] -- 서비스 키 --> P2
+  D --> E1
+  S3 -- "similar_bills()<br/>실패하면 TF-IDF" --> P2
+  S2 -. 실행 기록 .-> P3
 ```
+
+**Supabase 보안 정리** ([docs/supabase.md](docs/supabase.md))
+
+- 모든 표에 RLS 를 켰고, 쓰기는 정책과 함수(`approve_review` 등)로만 허용합니다.
+- 브라우저에는 공개(anon/publishable) 키만 배포 때 넣습니다(`SUPABASE_ANON_KEY` → `web/config.js`). 서비스 키는 Vercel 환경변수와 GitHub Actions secrets 에만 있습니다.
+- 역할(담당자 / 결재자)은 `members` 표로만 정합니다. 담당자는 진행 상태·메모를 저장하고, 결재자는 읽기 전용으로 결재만 합니다.
+- 키가 없거나 연결이 안 되면 예전처럼 각 브라우저(localStorage)에만 저장하고, 비슷한 법안은 단어 유사도(TF-IDF)로 찾습니다.
+- 시연용 클라우드 DB 이며, 실제 도입 시에는 같은 스키마를 기관 내부 PostgreSQL + pgvector 로 옮기고 `web/cloud.js`·`server/lib/supabase.js` 만 바꿉니다.
 
 ```text
 law-impact-map/
 ├─ collect/    # 수집·전처리·판정 데이터 생성 (Python)
-├─ server/     # Vercel 서버리스: api/ask.js(질의 도우미), api/agent.js(검토 에이전트)
+├─ server/     # Vercel 서버리스: api/ask.js(질의 도우미), api/agent.js(검토 에이전트), api/similar.js(비슷한 법안)
+├─ supabase/   # 시연용 클라우드 DB 스키마(schema.sql)와 마이그레이션 (docs/supabase.md)
 ├─ web/        # GitHub Pages 정적 사이트: index.html(지도), admin.html(행정 화면), judge.js(판정)
 ├─ data/       # 원천·중간 데이터 (CSV, GeoJSON)
 ├─ notebooks/  # 분야 분류 모델 학습
 ├─ docs/       # 데이터 점검, 코드표, 추출 방식 문서
-└─ .github/workflows/  # pages.yml(배포), daily-collect.yml(매일 새 법안 수집)
+└─ .github/workflows/  # pages.yml(배포), daily-collect.yml(매일 새 법안 수집), embed-bills.yml(법안 임베딩·비교)
 ```
 
-예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 지금은 법안명·요약문 단어 일치이며 벡터 임베딩은 쓰지 않음) 찾은 법안 내용만 근거로 답을 생성합니다.
+예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 법안명·요약문 단어 일치) 찾은 법안 내용만 근거로 답을 생성합니다. 법안 상세의 "비슷한 법안"은 요약문 임베딩(`paraphrase-multilingual-MiniLM-L12-v2`, Supabase pgvector)으로 찾고, 안 되면 단어 유사도(TF-IDF)로 대신하며 어느 방법을 썼는지 화면에 표시합니다. 두 방법 비교는 [docs/similar_compare.md](docs/similar_compare.md) (숫자는 `collect/compare_similar.py` 가 씀).
 
 <br />
 
