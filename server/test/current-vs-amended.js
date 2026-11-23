@@ -187,6 +187,28 @@ async function withWrongModel(no, fn) {
   });
 });
 
+test("2207658: 모델이 통계 문장(30세대 이상부터)을 근거로 골라도, 같은 수치·단위가 있는 개정 문장으로 바꿔 30세대 이상을 씀", () => {
+  const stat = sentenceOf("2207658", /30세대 이상부터/);
+  assert.strictEqual(stat.kind, "통계·배경");
+  const quote = stat.text.match(/30세대 이상부터 300세대 이상까지/)[0];
+  const r = Criteria.verify([
+    { attr: "세대수", value: 30, bound: "min", quote },
+    { attr: "세대수", value: 300, bound: "max", quote },
+  ], full["2207658"]);
+  assert.deepStrictEqual(r.rule.세대수, { min: 30 });
+  assert.ok(/확대/.test(r.evidence[0].quote), r.evidence[0].quote);
+  assert.ok(r.dropped.some((d) => d.value === 300 && d.why === "통계·배경 문장"), JSON.stringify(r.dropped));
+});
+
+test("현행·통계 문장의 수치가 개정 문장에 없으면 바꾸지 않음 (2213086 150세대, 2200958 100세대)", () => {
+  for (const [no, v] of [["2213086", 150], ["2200958", 100]]) {
+    const s = Criteria.classifySentences(full[no]).find((x) => new RegExp(v + "\\s*세대").test(x.text));
+    const q = s.text.match(new RegExp("[^,]*" + v + "\\s*세대[^,]*"))[0].trim();
+    const r = Criteria.verify([{ attr: "세대수", value: v, bound: "min", quote: q }], full[no]);
+    assert.ok(!r.rule.세대수, no + " " + JSON.stringify(r.rule));
+  }
+});
+
 (async () => {
   let fail = 0;
   for (const [n, f] of tests) {
