@@ -29,7 +29,7 @@ const test = (n, f) => tests.push([n, f]);
 const fieldPath = path.join(process.env.DATA_DIR, "models", "field_classifier.json");
 const passPath = path.join(process.env.DATA_DIR, "models", "pass_prediction.json");
 
-test("classify_field: 내보낸 신경망으로 분야 확률 상위 3개, 목록 분야와 비교", async () => {
+test("classify_field: 내보낸 분야 모델(검증 성적이 높은 쪽)로 분야 확률 상위 3개, 목록 분야와 비교", async () => {
   assert.ok(fs.existsSync(fieldPath), "models/field_classifier.json 없음");
   const r = await call({ bill: "2206436" });
   assert.strictEqual(r.code, 200, JSON.stringify(r.body));
@@ -54,6 +54,13 @@ test("predict_pass: 모델 결과가 있으면 확률과 성능, 없으면 '모�
   if (fs.existsSync(passPath) && b.pass_prob != null) {
     assert.ok(st.ok && /모델 추정/.test(st.summary), st.summary);
     assert.strictEqual(r.body.pass_model.p, b.pass_prob);
+    // 3단계 구간이 있으면 구간 이름과 그 구간의 실제 반영률을 함께 보여 준다 (경계는 [min, max))
+    const tiers = JSON.parse(fs.readFileSync(passPath, "utf8")).tiers || [];
+    if (tiers.length) {
+      const want = tiers.find((t) => b.pass_prob < t.max) || tiers[tiers.length - 1];
+      assert.strictEqual(r.body.pass_model.tier.name, want.name);
+      assert.ok(st.summary.indexOf("통과 가능성 " + want.name) === 0 && /같은 구간 21대 실제 반영률 \d+%/.test(st.summary), st.summary);
+    }
   } else {
     assert.strictEqual(st.ok, false);
     assert.ok(/아직 없습니다|예측이 없습니다/.test(st.summary), st.summary);

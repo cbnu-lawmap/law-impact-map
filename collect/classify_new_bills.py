@@ -7,8 +7,9 @@
 출력 : data/bills_field_pred.csv 맨 끝에 새 법안 줄만 덧붙인다. 이미 있는 줄은 건드리지 않는다.
 
 방법: 법안 이름과 제안이유를 글자 2개씩 끊어(바이그램) 나이브 베이즈로 분야를 고른다.
-노트북 모델보다 약하므로 확신도(CONF)를 0.5 이하로 낮춰 적는다.
-그러면 화면에 "분류 확인 필요"가 뜬다 (web/admin.js 의 CONF_LOW = 0.6).
+노트북 모델보다 약하므로 확신도(CONF)를 0.5 이하, 그리고 화면 기준값보다 낮게 적는다.
+그러면 화면에 "분류 확인 필요"가 뜬다 (기준값은 field_classifier.json 의 review_threshold,
+build_web_data.py 가 bills.json 의 review_threshold 로 옮겨 web/admin.js·web/app.js 가 읽는다).
 
 사용법 (저장소 맨 위 폴더에서):
     python collect/classify_new_bills.py
@@ -37,7 +38,23 @@ FIELD_NAMES = {
     4: "주택 공급·임대·금융", 5: "공동주택 관리·주거환경", 6: "정비사업·도시재생",
     7: "도시계획·건축규제", 8: "주차·보행·교통", 9: "건설산업·기술·기타",
 }
-CONF_CAP = 0.5      # 자동 분류 확신도 상한 (화면 기준 0.6 보다 낮게)
+MODEL = ROOT / "web" / "data" / "models" / "field_classifier.json"
+
+
+def conf_cap():
+    """자동 분류 확신도 상한: 0.5, 그리고 화면의 "분류 확인 필요" 기준값(review_threshold)보다 0.01 낮게.
+    그래서 이 임시 분류기가 붙인 법안은 기준값이 바뀌어도 늘 "분류 확인 필요"로 보인다."""
+    review = 0.6
+    try:
+        import json
+        with open(MODEL, encoding="utf-8") as f:
+            review = float(json.load(f).get("review_threshold", review))
+    except (OSError, ValueError):
+        pass
+    return round(min(0.5, review - 0.01), 2)
+
+
+CONF_CAP = conf_cap()   # 자동 분류 확신도 상한 (화면 기준값보다 낮게)
 NAME_WEIGHT = 3     # 법안 이름은 짧지만 분야를 잘 드러내므로 세 번 센다
 TEXT_LEN = 600      # 제안이유는 앞부분만 쓴다
 

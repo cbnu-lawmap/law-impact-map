@@ -20,7 +20,9 @@
     비대상: "기준에 해당하지 않음",
     판정불가: "속성 없음 또는 시행령 위임",
   };
-  var CONF_LOW = 0.6;   // 자동 분류 확신도가 이보다 낮으면 "분류 확인 필요"
+  // 자동 분류 확신도가 이보다 낮으면 "분류 확인 필요". bills.json 의 review_threshold
+  // (notebooks/field_classifier.ipynb 9-2절에서 검증 예측으로 정한 값)로 바꾼다. 0.6 은 파일에 값이 없을 때만 쓴다
+  var CONF_LOW = 0.6;
 
   // ---------------------------------------------------------------- 상태
   var state = {
@@ -498,6 +500,7 @@
     var bldg = res[0], bnd = res[1], bills = res[2], demo = res[3];
 
     state.fields = bills.fields;
+    if (typeof bills.review_threshold === "number") CONF_LOW = bills.review_threshold;
     state.bills = bills.bills;
     state.bills.forEach(function (b) { b._q = (b.name + " " + b.no + " " + b.summary + " " + b.committee).toLowerCase(); });
     Object.keys(state.fields).forEach(function (k) { state.checked.add(Number(k)); });

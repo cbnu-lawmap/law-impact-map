@@ -50,7 +50,9 @@
   };
   var USE_NAMES = Judge.USE_NAMES; // 주용도 코드 → 이름 (judge.js에 공통으로 둠)
   // 메모에 넣으면 안 되는 개인정보 (전화번호·주민등록번호·이메일)
-  var CONF_LOW = 0.6;   // 자동 분야 분류 확신도가 이보다 낮으면 "분류 확인 필요"
+  // 자동 분야 분류 확신도가 이보다 낮으면 "분류 확인 필요". bills.json 의 review_threshold
+  // (notebooks/field_classifier.ipynb 9-2절에서 검증 예측으로 정한 값)로 바꾼다. 0.6 은 파일에 값이 없을 때만 쓴다
+  var CONF_LOW = 0.6;
   var SHOT = /[?&]shot=1(&|$)/.test(location.search);
   var PII = /(01[016789][-\s]?\d{3,4}[-\s]?\d{4})|(\d{6}[-\s]?[1-4]\d{6})|([\w.+-]+@[\w-]+\.[\w.]+)/;
 
@@ -553,12 +555,12 @@
     });
     document.getElementById("f-csv").addEventListener("click", function () {
       downloadCSV("빼곡_법안검토목록_" + stamp() + ".csv",
-        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "통과 가능성(신경망 추정)", "진행", "의안정보시스템"],
+        ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "통과 가능성(신경망 추정)", "통과 확률(신경망 추정)", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
           return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
-            .concat([passPct(b), PG[pgOf(b.no)].label, b.link]);
+            .concat([passPct(b), b.pass_prob == null ? "" : b.pass_prob, PG[pgOf(b.no)].label, b.link]);
         }));
     });
     drawBillTable();
@@ -605,7 +607,7 @@
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
         '</td><td class="num">' + esc(b.date) + "</td><td>" + stageTag(b, true) + "</td><td>" + esc(fieldName(b.field)) +
-        (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + '</td><td class="num small muted">' + passPct(b) + "</td><td>" + pgMark(b.no) + "</td></tr>";
+        (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다">분류 확인 필요</span>' : "") + "</td><td>" + impact + '</td><td class="num small">' + passCell(b) + "</td><td>" + pgMark(b.no) + "</td></tr>";
     }).join("") || '<tr><td colspan="10" class="muted">조건에 맞는 법안이 없습니다.</td></tr>';
     html += "</tbody></table>" + pager(s.page, pages, list.length);
     var box = document.getElementById("bill-table");
@@ -655,10 +657,38 @@
       (D.demos[b.no] ? ' · <span class="tag' + (isAI(b.no) ? " wait" : " done") + '">기준 ' + esc(isAI(b.no) ? "AI 추출 · 담당자 검토 전" : "사람 추출") + "</span>" : "") + "</p>" + passLine(b);
   }
   // 통과 가능성: notebooks/pass_prediction.ipynb 의 신경망 추정 (21대 국회 처리 결과로 학습)
-  function passPct(b) { return b.pass_prob == null ? "" : Math.round(b.pass_prob * 100) + "%"; }
+  // 확률은 3단계(낮음·보통·높음)로 묶어 보여 준다. 구간 경계와 구간별 실제 반영 비율은 노트북 10-3절
+  // (시간 분리 시험: 21대 먼저 낸 80%로 학습 → 나중에 낸 20%)에서 정해 bills.json 의 pass_tiers 로 들어온다
+  function passTier(b) {
+    var T = D.passTiers || [];
+    if (b.pass_prob == null || !T.length) return null;
+    for (var i = 0; i < T.length; i++) if (b.pass_prob < T[i].max) return T[i];
+    return T[T.length - 1];
+  }
+  function passPct(b) {
+    if (b.pass_prob == null) return "";
+    var t = passTier(b);
+    return t ? t.name : Math.round(b.pass_prob * 100) + "%";
+  }
+  function passCell(b) {
+    var t = passTier(b);
+    if (!t) return esc(passPct(b));
+    return '<span class="pass-tier pass-' + ({ 낮음: "lo", 보통: "mid", 높음: "hi" }[t.name] || "mid") + '" title="신경망 추정 ' +
+      Math.round(b.pass_prob * 100) + "% · 같은 구간 21대 실제 반영률 " + Math.round(t.actual_rate * 100) + '%">' + esc(t.name) + "</span>";
+  }
   function passLine(b) {
-    return b.pass_prob == null ? "" : '<p class="small muted" style="margin-top:-6px">통과 가능성(신경망 추정) ' + passPct(b) +
-      " · 21대 국회 처리 결과로 학습 · 제안한 날 알 수 있는 정보만 사용(심사 단계는 반영 안 함) · 법안의 좋고 나쁨과 무관</p>";
+    if (b.pass_prob == null) return "";
+    var t = passTier(b);
+    var head = t ? "통과 가능성 " + t.name + " (같은 구간 21대 실제 반영률 " + Math.round(t.actual_rate * 100) + "%)" : "통과 가능성 " + passPct(b);
+    return '<p class="small muted" style="margin-top:-6px" title="신경망 추정 확률 ' + Math.round(b.pass_prob * 100) + '%">' + esc(head) +
+      " · 신경망 추정 · 제안한 날 알 수 있는 정보만 사용 · 21대 국회 처리 결과로 학습 · 법안의 좋고 나쁨과 무관</p>";
+  }
+  // 분야 분류에 쓰는 모델 (노트북이 검증 성적이 높은 쪽을 고름)
+  function fieldModelText() {
+    var m = D.fieldModel || {};
+    var name = m.model === "logreg" ? "팀 자체 학습 로지스틱 회귀" : m.model === "nn" ? "팀 자체 Keras 신경망" : "팀 자체 학습 모델";
+    return m.cv_mean_logreg != null && m.cv_mean_nn != null
+      ? name + " (검증 정확도 로지스틱 회귀 " + m.cv_mean_logreg.toFixed(3) + " · 신경망 " + m.cv_mean_nn.toFixed(3) + ", 높은 쪽 사용)" : name;
   }
   function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }
   // 판정한 법안의 기준 추출 방법 요약 (예: "사람 추출 2건 · AI 추출 24건(검토 전)")
@@ -1027,7 +1057,7 @@
     var judgedNos = Object.keys(D.demos);
     var confs = D.bills.map(function (b) { return b.conf || 0; });
     var hi = confs.filter(function (c) { return c >= 0.9; }).length;
-    var lo = confs.filter(function (c) { return c < 0.6; }).length;
+    var lo = confs.filter(function (c) { return c < CONF_LOW; }).length;
     var card = function (id, title, state, body) {
       var color = { 채택: "done", 참고: "", 보류: "wait", 확인필요: "wait" }[state] || "";
       return '<div class="card" style="margin-bottom:10px"><div style="display:flex;gap:8px;align-items:center"><b>' + id + "</b><b>" + esc(title) +
@@ -1047,7 +1077,7 @@
     }).join("<br>");
     html += card("V-01", "판정 재현", "채택", "Python(collect/build_web_data.py)과 화면(judge.js)이 같은 규칙. 지도 화면도 열 때마다 콘솔에서 대조.<br>" + checksHtml) +
       card("V-02", "판정불가 비율", "참고", "사창동 2,448동 중 건축물대장 미연계 약 13.4%(328동). 판정한 법안마다 판정불가가 커지는 원인") +
-      card("V-03", "분야 자동 분류 확신도", "참고", "확신도 0.9 이상 " + fmt(hi) + "건 · 0.6 미만 " + fmt(lo) + "건 (전체 " + fmt(D.bills.length) + "건). 낮은 법안은 분야 필터에서 빠지거나 잘못 들어갈 수 있음") +
+      card("V-03", "분야 자동 분류 확신도", "참고", "확신도 0.9 이상 " + fmt(hi) + "건 · " + CONF_LOW + " 미만(분류 확인 필요) " + fmt(lo) + "건 (전체 " + fmt(D.bills.length) + "건). 낮은 법안은 분야 필터에서 빠지거나 잘못 들어갈 수 있음") +
       card("V-04", "기준 추출", "보류", "판정한 법안 " + judgedNos.length + "건 — " + methodSummary() + ". AI 추출 건은 원문 문구·수치를 자동 대조했지만 담당자 검토 전. 나머지 " + fmt(D.bills.length - judgedNos.length) + "건은 AI 추출(원문 수치 자동 대조) 단계에서 판정 예정") +
       card("V-05", "질의 도우미 답의 숫자", "채택", "서버가 답에 나온 숫자를 근거 자료와 대조해, 근거에 없는 숫자는 경고로 표시");
     html += '<div id="xc-rules"><p class="muted small">기준 교차 확인을 불러오는 중…</p></div>';
@@ -1080,7 +1110,7 @@
     $view.innerHTML = '<h2>데이터·한계</h2><p class="lead">이 화면의 숫자가 어디서 왔고, 어디까지 믿을 수 있는지</p>' +
       '<div class="table-wrap"><table class="dt"><thead><tr><th>자료</th><th>출처</th><th>범위</th><th>쓰는 곳</th></tr></thead><tbody>' +
       "<tr><td>법안 목록·제안이유</td><td>열린국회정보 Open API</td><td>22대 국회 계류 " + fmt(D.bills.length) + "건 (건축·주거·안전 관련 위원회)</td><td>법안 검토 목록, 분야 분류, 질의 도우미</td></tr>" +
-      "<tr><td>분야 분류</td><td>팀 자체 Keras 신경망</td><td>9개 분야 자동 분류. 확신도 " + CONF_LOW + " 미만은 「분류 확인 필요」 표시</td><td>분야 필터 (자동 분류라 틀릴 수 있음)</td></tr>" +
+      "<tr><td>분야 분류</td><td>" + esc(fieldModelText()) + "</td><td>9개 분야 자동 분류. 확신도 " + CONF_LOW + " 미만은 「분류 확인 필요」 표시 (검증 예측으로 정한 값)</td><td>분야 필터 (자동 분류라 틀릴 수 있음)</td></tr>" +
       "<tr><td>건물 속성</td><td>국토교통부 브이월드 건물통합정보</td><td>" + esc(D.region) + " " + fmt(D.total) + "동 · PNU, 주용도, 연면적, 층수, 사용승인일</td><td>판정, 건물 명부</td></tr>" +
       "<tr><td>적용 기준</td><td>법안 원문에서 추출 (" + methodSummary() + ", 원문 대조)</td><td>" + Object.keys(D.demos).length + "건</td><td>판정 (나머지는 추출 예정)</td></tr>" +
       "<tr><td>질의 도우미</td><td>OpenAI (별도 서버 경유)</td><td>공개 법안 자료와 질문만 보냄. 설정에서 끌 수 있음</td><td>오른쪽 아래 「질의 도우미」</td></tr>" +
@@ -1447,6 +1477,9 @@
   Promise.all([getJSON("data/bills.json"), getJSON("data/demo_rules.json")]).then(function (res) {
     D.fields = res[0].fields;
     D.bills = res[0].bills;
+    if (typeof res[0].review_threshold === "number") CONF_LOW = res[0].review_threshold;
+    D.fieldModel = res[0].field_model || {};
+    D.passTiers = res[0].pass_tiers || [];
     D.bills.forEach(function (b) {
       D.byNo[b.no] = b;
       b._q = (b.name + " " + b.no + " " + b.summary + " " + b.committee).toLowerCase();
