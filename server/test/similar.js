@@ -9,7 +9,7 @@ const assert = require("assert");
 const path = require("path");
 
 process.env.DATA_DIR = path.join(__dirname, "..", "..", "web", "data");
-const KEYS = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY"];
+const KEYS = ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_ANON_KEY", "SIMILAR_METHOD"];
 const saved = {};
 KEYS.forEach((k) => { saved[k] = process.env[k]; delete process.env[k]; });
 
@@ -112,16 +112,66 @@ const useKeys = () => { process.env.SUPABASE_URL = "https://example.supabase.co"
     assert.strictEqual(r.body.items.length, 5);
   });
 
-  await test("API: pgvector 가 답하면 그 결과 (목록에 없는 번호는 뺌)", async () => {
+  await test("RRF: 점수 = Σ 1/(60+순위), 두 목록에 다 있으면 위로, 같으면 번호 순", () => {
+    const r = sim.rrf([["A", "B", "C"], ["C", "D"]]);
+    assert.deepStrictEqual(r.map((x) => x.no), ["C", "A", "B", "D"]);
+    assert.ok(Math.abs(r[0].rrf - (1 / 63 + 1 / 61)) < 1e-12);
+    assert.deepStrictEqual(r[0].ranks, [3, 1]);
+    assert.deepStrictEqual(r[3].ranks, [null, 2]);
+    assert.deepStrictEqual(sim.rrf([["B"], ["A"]]).map((x) => x.no), ["A", "B"]);
+  });
+
+  await test("방법 고르기: 환경변수 → 측정 파일 → tfidf", () => {
+    assert.strictEqual(sim.primaryMethod({ measured: null }, {}), "tfidf");
+    assert.strictEqual(sim.primaryMethod({ measured: "hybrid" }, {}), "hybrid");
+    assert.strictEqual(sim.primaryMethod({ measured: "hybrid" }, { SIMILAR_METHOD: "tfidf" }), "tfidf");
+    assert.strictEqual(sim.primaryMethod({ measured: "tfidf" }, { SIMILAR_METHOD: "hybrid" }), "hybrid");
+    assert.strictEqual(sim.primaryMethod({ measured: null }, { SIMILAR_METHOD: "pgvector" }), "tfidf"); // 모르는 값은 무시
+  });
+
+  const vecReply = () => ({ ok: true, status: 200, text: async () => JSON.stringify([
+    { bill_no: "9999999", law: "", similarity: 0.99 },
+    { bill_no: bills[2].no, law: "", similarity: 0.8 },
+  ]) });
+
+  await test("API: tfidf 가 정해진 방법이면 pgvector 를 부르지 않음", async () => {
     useKeys();
-    global.fetch = async () => ({ ok: true, status: 200, text: async () => JSON.stringify([
-      { bill_no: "9999999", law: "", similarity: 0.99 },
-      { bill_no: bills[2].no, law: "", similarity: 0.8 },
-    ]) });
+    process.env.SIMILAR_METHOD = "tfidf";
+    let called = 0;
+    global.fetch = async () => { called++; return vecReply(); };
     const r = await call("/api/similar?no=" + a + "&k=2");
-    assert.strictEqual(r.body.method, "pgvector");
-    assert.strictEqual(r.body.label, "의미 검색(pgvector)");
-    assert.deepStrictEqual(r.body.items.map((x) => x.no), [bills[2].no]);
+    delete process.env.SIMILAR_METHOD;
+    assert.strictEqual(r.body.method, "tfidf");
+    assert.strictEqual(r.body.primary, "tfidf");
+    assert.strictEqual(called, 0);
+  });
+
+  await test("API: hybrid 면 TF-IDF 와 pgvector 를 RRF 로 합침 (목록에 없는 번호는 뺌)", async () => {
+    useKeys();
+    process.env.SIMILAR_METHOD = "hybrid";
+    global.fetch = async () => vecReply();
+    const r = await call("/api/similar?no=" + a + "&k=3");
+    delete process.env.SIMILAR_METHOD;
+    assert.strictEqual(r.body.method, "hybrid");
+    assert.strictEqual(r.body.label, "단어 + 의미 결합(RRF)");
+    assert.strictEqual(r.body.items.length, 3);
+    assert.ok(r.body.items.every((x) => x.no !== "9999999" && x.no !== a && typeof x.rrf === "number" && typeof x.score === "number"));
+    // 결합 순서는 RRF 점수 순이고, pgvector 1위(bills[2]) 는 TF-IDF 순위와 상관없이 점수를 받는다
+    const tf = sim.similarByTfidf(await sim.loadData(), a, sim.POOL).map((x) => x.no);
+    const want = sim.rrf([tf, [bills[2].no]]).slice(0, 3).map((x) => x.no);
+    assert.deepStrictEqual(r.body.items.map((x) => x.no), want);
+    const v = r.body.items.find((x) => x.no === bills[2].no);
+    if (v) assert.strictEqual(v.rank_vector, 1);
+  });
+
+  await test("API: hybrid 인데 pgvector 가 실패하면 TF-IDF", async () => {
+    useKeys();
+    process.env.SIMILAR_METHOD = "hybrid";
+    global.fetch = async () => { throw new Error("timeout"); };
+    const r = await call("/api/similar?no=" + a + "&k=2");
+    delete process.env.SIMILAR_METHOD;
+    assert.strictEqual(r.body.method, "tfidf");
+    assert.strictEqual(r.body.primary, "hybrid");
   });
 
   await test("API: judged=1 이면 판정한 법안만", async () => {

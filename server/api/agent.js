@@ -37,7 +37,7 @@ const Criteria = require("../lib/criteria");
 const { loadModel } = require("../lib/nn");
 const Agentic = require("../lib/agentic");
 const Sources = require("../lib/sources");
-const { similarByVector } = require("../lib/similar");
+const { similarByVector, primaryMethod, rrf, METHODS: SIMILAR_METHODS } = require("../lib/similar");
 const { logRun } = require("../lib/runs");
 const crypto = require("crypto");
 const MODES = ["agent", "agentic", "rag1"];
@@ -67,6 +67,8 @@ async function loadData() {
     loadJson("bills.json"), loadJson("demo_rules.json"), loadJson("crosscheck.json"), loadJson("buildings.geojson"),
     loadJson("summaries.json").catch(() => null),   // 제안이유 전문 (없으면 bills.json 의 300자 요약)
   ]);
+  // 비슷한 법안 방법 (collect/compare_similar.py 가 측정해 씀). 없으면 tfidf
+  const sim = await loadJson("similar_method.json").catch(() => null);
   // 재검색 출처 (법안 원문 개정 부분, 검토보고서 문장). 없으면 search_sources 가 "없음" 으로 답한다
   const docs = await loadJson("bill_docs.json").catch(() => null);
   const demos = {};
@@ -85,7 +87,8 @@ async function loadData() {
   ]);
   const models = { field: fm ? loadModel(fm) : null, pass: pm || null };
   const full = (sm && sm.summaries) || {};
-  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models, full, docs: (docs && docs.docs) || {} };
+  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models, full, docs: (docs && docs.docs) || {},
+    similarMethod: sim && SIMILAR_METHODS.includes(sim.method) ? sim.method : null };
   return dataCache;
 }
 
@@ -727,17 +730,23 @@ module.exports = async function handler(req, res) {
 };
 
 /**
- * Agentic RAG 의 비슷한 법안 규칙(similar_rules)을 pgvector 로 찾는다.
- * 시범 규칙이 있는 법안 중 의미가 가까운 3건. pgvector 를 못 쓰면(키 없음·임베딩 없음·실패) TF-IDF 그대로.
+ * Agentic RAG 의 비슷한 법안 규칙(similar_rules)도 비슷한 법안 찾기(lib/similar.js)와 같은 방법을 따른다.
+ *   tfidf (측정 결과 TF-IDF 가 이김, 또는 SIMILAR_METHOD=tfidf)  → D 그대로 (시범 법안 사이 TF-IDF, sources.js)
+ *   hybrid → 시범 규칙이 있는 법안 중 pgvector 상위 20 과 TF-IDF 순위를 RRF 로 합친 3건.
+ *            pgvector 를 못 쓰면(키 없음·임베딩 없음·실패) TF-IDF 그대로.
  * 공용 D 는 캐시라 고치지 않고, 이 요청에만 쓰는 얕은 사본을 돌려준다.
  */
 async function withVectorRules(D, no) {
+  if (primaryMethod({ measured: D.similarMethod }) !== "hybrid") return D;
   const near = await similarByVector(no, 20);
-  const hits = (near || []).filter((x) => x.no !== no && D.demos[x.no]).slice(0, 3);
-  if (!hits.length) return D;
-  const rules = hits.map((x) => ({
-    no: x.no, title: D.demos[x.no].title, score: Math.round(x.score * 1000) / 1000,
-    rule: D.demos[x.no].rule, label: Sources.CANDIDATE_LABEL, method: "pgvector",
+  const vNos = (near || []).map((x) => x.no).filter((x) => x !== no && D.demos[x]);
+  if (!vNos.length) return D;
+  const tf = (D.similarRules || Sources.createSimilarRules(D))(no, Object.keys(D.demos).length);
+  const tScore = new Map(tf.map((x) => [x.no, x.score]));
+  const vScore = new Map(near.map((x) => [x.no, x.score]));
+  const rules = rrf([tf.map((x) => x.no), vNos]).slice(0, 3).map((x) => ({
+    no: x.no, title: D.demos[x.no].title, score: tScore.has(x.no) ? tScore.get(x.no) : Math.round(vScore.get(x.no) * 1000) / 1000,
+    rrf: Math.round(x.rrf * 10000) / 10000, rule: D.demos[x.no].rule, label: Sources.CANDIDATE_LABEL, method: "hybrid",
   }));
   return Object.assign(Object.create(D), { similarRules: (n, k = 3) => rules.slice(0, k) });
 }

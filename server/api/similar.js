@@ -2,10 +2,12 @@
  * 빼곡 — 비슷한 법안 (Vercel 서버리스 함수)
  *
  *   GET /api/similar?no=2206436&k=5[&judged=1]
- *   → { no, method: "pgvector" | "tfidf", label, items: [{ no, name, law, score, judged, same_law }] }
+ *   → { no, method: "hybrid" | "tfidf", label, primary, items: [{ no, name, law, score, judged, same_law, rrf? }] }
  *
- * 의미 검색(Supabase pgvector, rpc similar_bills)을 먼저 쓰고, 키가 없거나 실패하면
- * 공개 요약문 전문의 단어 유사도(TF-IDF)로 대신한다. 어느 쪽을 썼는지 method 로 알려 준다.
+ * 측정으로 정한 방법(web/data/similar_method.json, collect/compare_similar.py 가 씀)을 쓴다.
+ *   tfidf  공개 요약문 전문의 단어 유사도(TF-IDF)
+ *   hybrid TF-IDF 상위 20 과 의미 검색(Supabase pgvector, rpc similar_bills) 상위 20 을 RRF 로 합침.
+ *          키가 없거나 실패하면 TF-IDF 로 대신한다. 어느 쪽을 썼는지 method 로 알려 준다.
  * 공개 법안 데이터만 다루며 AI 모델을 부르지 않는다.
  */
 const { cors, createLimiter, clientIp } = require("../lib/common");
