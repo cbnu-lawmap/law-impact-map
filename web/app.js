@@ -294,6 +294,8 @@
       ["구조", Judge.isEmpty(p.strct_cd) ? val(null) : esc(Judge.structName(p.strct_cd))],
       ["PNU", val(p.pnu)],
     ];
+    // 세대수는 건축물대장 표제부에만 있어(동별 값) 있을 때만 보인다
+    if (!Judge.isEmpty(p.hhld_cnt)) rows.splice(5, 0, ["세대수", src("hhld_cnt", fmt(p.hhld_cnt) + "세대")]);
     // 속성이 빈 건물: 신경망 추정 구간 (notebooks/building_imputation.ipynb). 판정에는 쓰지 않음
     // [속성, 구간 이름 키, 확률 키, 카드 이름, 넣을 자리(그 속성 줄 바로 아래)]
     // 방법(est_*_m)은 노트북이 대상마다 더 잘 맞는 쪽으로 고름: 신경망 또는 이웃 8동 다수결
