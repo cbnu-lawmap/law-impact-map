@@ -37,6 +37,8 @@ const Criteria = require("../lib/criteria");
 const { loadModel } = require("../lib/nn");
 const Agentic = require("../lib/agentic");
 const Sources = require("../lib/sources");
+const { similarByVector } = require("../lib/similar");
+const { logRun } = require("../lib/runs");
 const crypto = require("crypto");
 const MODES = ["agent", "agentic", "rag1"];
 
@@ -712,14 +714,32 @@ module.exports = async function handler(req, res) {
     if (!mock && !cfg.ready) { res.status(503).json({ error: "AI 키가 설정되지 않았습니다" }); return; }
     const llm = mock ? mockLLM() : openaiLLM(cfg.key, MODEL, cfg.url);
     const limits = { TOKEN_CAP, MAX_STEPS, CALL_MAX_TOKENS, DRAFT_MAX_TOKENS };
+    const DD = mode === "agentic" ? await withVectorRules(D, no) : D;
     const out = mode === "agent" ? await run(D, no, note, llm)
-      : await (mode === "agentic" ? Agentic.runAgentic : Agentic.runRag1)({ D, no, note, llm, limits, EXTRACT_PROMPT });
+      : await (mode === "agentic" ? Agentic.runAgentic : Agentic.runRag1)({ D: DD, no, note, llm, limits, EXTRACT_PROMPT });
     results.set(key, { at: Date.now(), body: out });
+    if (!mock) await logRun({ bill_no: no, mode, steps: out.step_count || (out.steps || []).length, tokens: out.tokens });
     res.status(200).json(out);
   } catch (e) {
     res.status(502).json({ error: "검토 초안을 만들지 못했습니다: " + maskKey(e) });
   }
 };
 
+/**
+ * Agentic RAG 의 비슷한 법안 규칙(similar_rules)을 pgvector 로 찾는다.
+ * 시범 규칙이 있는 법안 중 의미가 가까운 3건. pgvector 를 못 쓰면(키 없음·임베딩 없음·실패) TF-IDF 그대로.
+ * 공용 D 는 캐시라 고치지 않고, 이 요청에만 쓰는 얕은 사본을 돌려준다.
+ */
+async function withVectorRules(D, no) {
+  const near = await similarByVector(no, 20);
+  const hits = (near || []).filter((x) => x.no !== no && D.demos[x.no]).slice(0, 3);
+  if (!hits.length) return D;
+  const rules = hits.map((x) => ({
+    no: x.no, title: D.demos[x.no].title, score: Math.round(x.score * 1000) / 1000,
+    rule: D.demos[x.no].rule, label: Sources.CANDIDATE_LABEL, method: "pgvector",
+  }));
+  return Object.assign(Object.create(D), { similarRules: (n, k = 3) => rules.slice(0, k) });
+}
+
 // 시험용 (node server/scripts/test-agent.js)
-module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP, llmConfig, OPENAI_URL, EXTRACT_PROMPT, compareAllowed, MODES };
+module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP, llmConfig, OPENAI_URL, EXTRACT_PROMPT, compareAllowed, MODES, withVectorRules };
