@@ -130,7 +130,7 @@ law-impact-map/
 | 노트북 | 문제 | 데이터 | 기준선 | 신경망 | 화면에 쓰이는 곳 | Colab |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
 | [분야 분류](notebooks/field_classifier.ipynb) | 법안 제안이유 → 9개 분야 | 사람이 붙인 라벨 298건 | 규칙(법률명) 0.757, 로지스틱 회귀 0.808 (10회 평균 정확도) | Dense 128 → Softmax 9, **0.788 ± 0.043** | 지도·행정 화면 분야 필터, 확신도 0.6 미만 "분류 확인 필요", 에이전트 `classify_field` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_classifier.ipynb) |
-| [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 | 다수 클래스 정확도 0.642, 법률별 반영 비율 AUC 0.591, 로지스틱 회귀 AUC 0.749 | Dense 16 → Sigmoid, **AUC 0.737**, F1 0.615 (시간 분리 AUC 0.624) | 행정 화면 법안 상세·목록 "통과 가능성(신경망 추정)", 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
+| [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 + 공동발의·제안일 위원회 소속(제안 시점 정보) | 다수 클래스 정확도 0.642, 로지스틱 회귀 AUC 0.722 | Dense 16 → Sigmoid, **AUC 0.718**, F1 0.56 (시간 분리 AUC 0.662, 공동발의 정보 넣기 전 0.625) | 행정 화면 법안 상세·목록 "통과 가능성(신경망 추정)", 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
 | [건물 층수 추정](notebooks/building_imputation.ipynb) | 건축물대장이 없는 건물의 지상층수(5구간) | 사창동 층수가 있는 건물 2,108동 | 최빈값 0.403, 이웃 8동 다수결 0.488, 로지스틱 회귀 0.540 | Dense 64-32 → Softmax 5, **0.547** (한 구간 차이까지 0.889) | 지도 건물 카드 "추정 지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
 
 - 노트북마다 같은 순서입니다: 문제 → 데이터 → 전처리 → 학습/테스트 분리 → 기준선 → 신경망 → 과적합 확인 → 은닉층 실험 → 오답 분석 → 결과표 → 화면에 쓰이는 곳.
@@ -138,7 +138,7 @@ law-impact-map/
 - 숫자는 시드를 고정해도 실행하는 CPU 종류에 따라 셋째 자리가 조금 달라질 수 있습니다. 노트북의 결과표는 실행한 숫자로 코드가 만듭니다.
 - 학습한 가중치는 `web/data/models/`로 내보내고, 서버(`server/lib/nn.js`)가 TensorFlow 없이 같은 계산을 합니다. `node server/test/nn.js`가 Keras 예측과 서버 계산이 같은지 확인합니다.
 - 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다.
-- 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다.
+- 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다. 공동발의 인원과 제안일에 소관 위원회 위원이었는지(숫자·0/1)는 `collect-process.yml`이 모은 `data/bills_process_21.csv`·`_22.csv`에서 가져옵니다. 위원회 상정처럼 제안 뒤에 생기는 정보는 노트북에서 비교만 하고 화면에는 쓰지 않습니다.
 
 <br />
 

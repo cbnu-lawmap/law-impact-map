@@ -1,0 +1,45 @@
+# 법안 심사 경과·공동발의 정보 수집 (통과 예측 특징)
+# 열린국회 키는 GitHub Secret ASSEMBLY_API_KEY 로만 쓴다. 결과 CSV 는 같은 브랜치에 커밋한다.
+name: Collect bill process
+
+on:
+  push:
+    branches: [feat/bill-process-data]
+    paths: ["collect/collect_process.py", ".github/workflows/collect-process.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-process-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  collect:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install -r collect/requirements.txt
+      - name: Collect
+        env:
+          ASSEMBLY_API_KEY: ${{ secrets.ASSEMBLY_API_KEY }}
+        run: |
+          if [ -z "$ASSEMBLY_API_KEY" ]; then echo "키 없음: 건너뜀"; exit 0; fi
+          python collect/collect_process.py
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config core.autocrlf input
+          for f in data/bills_process_21.csv data/bills_process_22.csv; do [ -e "$f" ] && git add "$f"; done
+          true
+          git diff --cached --quiet && { echo "바뀐 것 없음"; exit 0; }
+          git commit -m "data: 법안 심사 경과·공동발의 특징 수집 (Actions)"
+          git push origin HEAD:${{ github.ref_name }}

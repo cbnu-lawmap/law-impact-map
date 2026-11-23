@@ -658,7 +658,7 @@
   function passPct(b) { return b.pass_prob == null ? "" : Math.round(b.pass_prob * 100) + "%"; }
   function passLine(b) {
     return b.pass_prob == null ? "" : '<p class="small muted" style="margin-top:-6px">통과 가능성(신경망 추정) ' + passPct(b) +
-      " · 21대 국회 처리 결과로 학습 · 법안의 좋고 나쁨과 무관</p>";
+      " · 21대 국회 처리 결과로 학습 · 제안한 날 알 수 있는 정보만 사용(심사 단계는 반영 안 함) · 법안의 좋고 나쁨과 무관</p>";
   }
   function isAI(no) { return /^AI/.test((D.demos[no] && D.demos[no].method) || ""); }
   // 판정한 법안의 기준 추출 방법 요약 (예: "사람 추출 2건 · AI 추출 24건(검토 전)")
