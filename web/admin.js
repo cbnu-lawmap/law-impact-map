@@ -13,7 +13,8 @@
  *   #/print/번호  검토서   #/progress  진행 현황   #/rules  판정 규칙·검증   #/sources  데이터·한계
  *
  * 진행 기록은 이 브라우저(localStorage)에 남고, 담당자끼리는 CSV로 주고받는다.
- * 배포본에 Supabase 공개 키가 있으면(web/config.js) 구성원은 이메일 링크로 로그인해 진행 기록을 함께 쓴다 (web/cloud.js, 시연용).
+ * 배포본에 Supabase 공개 키가 있으면(web/config.js) 진행 기록을 함께 본다 (web/cloud.js, 시연용). 로그인 없이 화면 맨 위에서
+ * 역할(담당자 / 결재자)과 표시 이름을 고르고, 저장·결재는 서버(server/api/progress.js)를 거친다.
  * 질의 도우미와 검토 에이전트만 별도 서버(server/api/ask.js, agent.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
  * 설정에서 질의 도우미(AI)를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
  * 로컬 시험: localhost 에서 열고 ?api=http://localhost:3000 을 붙이면 그 서버에 묻는다 (server/scripts/dev-server.js).
@@ -781,7 +782,7 @@
   // 진행 상태 · 메모 · 처리 이력 (필지 블랙박스 사건 이력, 사각119 인계 메모)
   function progressBox(no) {
     var p = progress[no] || { s: "todo", memo: "", log: [] };
-    var ro = Cloud.readOnly() ? " disabled" : ""; // 결재자(클라우드 모드)는 읽기 전용
+    var ro = Cloud.readOnly() ? " disabled" : ""; // 클라우드 모드에서 담당자가 아니면 읽기 전용
     return '<div class="card no-print" id="pg-card" style="margin-bottom:16px"><div class="pg-box"><div>' +
       '<div class="field-label">진행 상태</div><div class="pg-pick">' +
       PG_KEYS.map(function (k) {
@@ -1092,9 +1093,9 @@
     var active = D.bills.filter(function (b) { return pgOf(b.no) !== "todo" || (progress[b.no] && progress[b.no].memo); })
       .sort(function (a, b) { return ((progress[b.no] || {}).t || "") > ((progress[a.no] || {}).t || "") ? 1 : -1; });
     var html = '<h2>진행 현황</h2><p class="lead">법안 검토가 어디까지 됐는지. ' + (Cloud.active()
-      ? "기록은 클라우드(시연용)에 저장되어 구성원이 함께 봅니다.</p>"
+      ? "기록은 클라우드(시연용)에 저장되어 함께 봅니다.</p>"
       : "기록은 이 브라우저에만 저장되므로, 담당자끼리는 CSV로 주고받습니다.</p>");
-    html += Cloud.panelHtml(); // 클라우드 로그인·역할·결재 대기 (키가 없으면 빈 문자열)
+    html += Cloud.panelHtml(); // 클라우드 연결 상태·역할·승인 대기 (키가 없으면 빈 문자열)
     html += '<div class="kpis">' + PG_KEYS.map(function (k) {
       return kpi(PG[k].label, fmt(cnt[k]) + "건", k === "done" ? "결재 대기" : k === "hold" ? "시행령 확정 등을 기다림" :
         k === "doing" ? "담당자가 보고 있음" : "계류 법안 " + fmt(D.bills.length) + "건 중", k === "done" && cnt.done > 0);
@@ -1128,7 +1129,7 @@
         var rows = parseCSV(text), head = rows.shift() || [];
         var iNo = head.indexOf("의안번호"), iPg = head.indexOf("진행"), iMemo = head.indexOf("메모"), iT = head.indexOf("마지막 변경");
         if (iNo < 0 || iPg < 0) throw new Error("의안번호·진행 열이 있는 CSV가 아닙니다");
-        if (Cloud.readOnly()) throw new Error("결재자는 진행 기록을 바꿀 수 없습니다");
+        if (Cloud.readOnly()) throw new Error("클라우드 모드에서는 담당자(화면 맨 위에서 역할·이름을 정함)만 진행 기록을 바꿀 수 있습니다");
         var byLabel = {};
         PG_KEYS.forEach(function (k) { byLabel[PG[k].label] = k; });
         var n = 0, skipped = 0, imported = [];
@@ -1257,8 +1258,9 @@
       "<li><b>수집하지 않는 것</b>: 건물명, 소유자, 주소, 지번 상세. 건물은 PNU(필지 고유번호)와 대장 속성만 씁니다.</li>" +
       "<li><b>이 브라우저에만 저장</b>: 역할·모드 선택, 진행 상태, 인계 메모, 건물 확인 결과, 검토서의 부서·직위. 서버로 보내지 않습니다.</li>" +
       "<li><b>메모</b>: 전화번호·주민등록번호·이메일로 보이는 내용은 저장하지 않습니다. 이름·주소도 넣지 마세요.</li>" +
-      (Cloud.enabled() ? "<li><b>검토 공유(로그인한 구성원만)</b>: 진행 상태·인계 메모·수정자 이메일·시각을 시연용 클라우드 DB(Supabase)에 저장합니다. " +
-        "구성원끼리만 읽을 수 있고, 다른 사람의 이메일은 화면에 아이디 앞 두 글자만 보입니다. 실제 도입 시 기관 내부 DB로 바꿉니다.</li>" : "") +
+      (Cloud.enabled() ? "<li><b>검토 공유</b>: 진행 상태·인계 메모·표시 이름·역할·시각을 시연용 클라우드 DB(Supabase)에 저장합니다. " +
+        "로그인이 없는 공개 시연 데이터라 누구나 읽을 수 있으므로, 이름 칸에는 화면에 보일 이름만 적고 실명·연락처는 넣지 마세요. " +
+        "역할과 이름은 이 브라우저에만 남습니다. " + esc(Cloud.NOTICE) + ". 실제 도입 시 기관 내부 DB로 바꿉니다.</li>" : "") +
       "<li><b>질의 도우미</b>: 질문과 공개 법안 자료만 별도 서버를 거쳐 OpenAI로 보냅니다. 개인정보가 든 질문은 서버에서 거절합니다. 질문을 저장하지 않습니다.</li>" +
       "<li><b>공개 범위</b>: 시연용 공개 화면입니다. 도입 시 행정망 내부 전용으로 운영합니다.</li>" +
       "</ul><div style=\"text-align:right\"><button type=\"button\" class=\"btn\" data-close>닫기</button></div>");
@@ -1661,14 +1663,15 @@
     window.scrollTo(0, 0);
   }
 
-  // 검토 진행 공유 (web/cloud.js). 키가 없거나 로그인 전이면 지금처럼 이 브라우저 기록만 쓴다
+  // 검토 진행 공유 (web/cloud.js). 키가 없거나 연결이 안 되면 지금처럼 이 브라우저 기록만 쓴다
   function initCloud() {
     Cloud.init({
       PG: PG, PII: PII,
       getProgress: function () { return progress; },
       setProgress: function (obj) { progress = obj; },
       localProgress: function () { return load("progress", {}); },
-      updateProgress: function (no, p) { progress[no] = p; },
+      updateProgress: function (no, p) { if (p) progress[no] = p; else delete progress[no]; },
+      apiBase: API_BASE,
       billName: function (no) { return D.byNo[no] ? D.byNo[no].name : no; },
       validNo: function (no) { return !!D.byNo[no]; },
       refresh: function () {
