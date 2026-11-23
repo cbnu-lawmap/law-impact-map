@@ -12,7 +12,8 @@
  *   #/  상황판      #/bills  법안 검토 목록     #/bill/번호  법안별 집계·건물 명부
  *   #/print/번호  검토서   #/progress  진행 현황   #/rules  판정 규칙·검증   #/sources  데이터·한계
  *
- * 로그인·서버 저장이 없다. 진행 기록은 이 브라우저(localStorage)에만 남고, 담당자끼리는 CSV로 주고받는다.
+ * 진행 기록은 이 브라우저(localStorage)에 남고, 담당자끼리는 CSV로 주고받는다.
+ * 배포본에 Supabase 공개 키가 있으면(web/config.js) 구성원은 이메일 링크로 로그인해 진행 기록을 함께 쓴다 (web/cloud.js, 시연용).
  * 질의 도우미와 검토 에이전트만 별도 서버(server/api/ask.js, agent.js, Vercel)에 묻는다. OpenAI 키는 그 서버 환경변수에만 있다.
  * 설정에서 질의 도우미(AI)를 끄면 그 서버에 아예 연결하지 않는다 (행정망용).
  * 로컬 시험: localhost 에서 열고 ?api=http://localhost:3000 을 붙이면 그 서버에 묻는다 (server/scripts/dev-server.js).
@@ -70,6 +71,7 @@
   }
   function save(key, val) {
     if (SHOT) return; // 화면 찍기용: 저장하지 않음
+    if (key === "progress" && Cloud.active()) return; // 클라우드 모드: 진행 기록은 cloud.js 가 저장 (이 브라우저 기록은 그대로 둠)
     try { localStorage.setItem("ppaegok." + key, JSON.stringify(val)); } catch (e) { /* 저장 불가(사생활 보호 모드 등) */ }
   }
   var progress = load("progress", {});   // { 번호: { s, memo, t, log: [[시각, 내용]] } }
@@ -79,6 +81,7 @@
 
   function pgOf(no) { return (progress[no] && progress[no].s) || "todo"; }
   function setPg(no, s, note) {
+    if (Cloud.readOnly()) return; // 결재자는 읽기 전용
     var p = progress[no] || { s: "todo", memo: "", log: [] };
     if (p.s === s && !note) return;
     var t = new Date().toISOString();
@@ -87,6 +90,7 @@
     p.t = t;
     progress[no] = p;
     save("progress", progress);
+    Cloud.push(no, p); // 클라우드 모드(담당자)일 때만 저장, 아니면 아무것도 안 함
     drawSideProgress();
   }
   function pgBadge(s) { return '<span class="pg pg-' + s + '">' + PG[s].label + "</span>"; }
@@ -346,7 +350,7 @@
     html += newBillsCard();
     html += nearPassCard();
     html += passTierSummary();
-    html += '<div id="volume-slot"></div>';
+    html += '<div id="volume-slot"></div><div id="cloud-stats-slot"></div>';
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
@@ -397,6 +401,7 @@
     var more = document.getElementById("near-more");
     if (more) more.addEventListener("click", function () { ui.bills.stage = "near"; ui.bills.page = 0; });
     fillVolumeCard();
+    Cloud.fillStats("cloud-stats-slot"); // AI 초안 N건 중 사람 수정 M건 (키가 없으면 그리지 않음)
   }
 
   // 상황판 카드: 다음 주 예상 발의량 (notebooks/bill_volume_rnn.ipynb 가 내보낸 숫자). 파일이 없으면 카드를 그리지 않는다
@@ -776,20 +781,23 @@
   // 진행 상태 · 메모 · 처리 이력 (필지 블랙박스 사건 이력, 사각119 인계 메모)
   function progressBox(no) {
     var p = progress[no] || { s: "todo", memo: "", log: [] };
+    var ro = Cloud.readOnly() ? " disabled" : ""; // 결재자(클라우드 모드)는 읽기 전용
     return '<div class="card no-print" id="pg-card" style="margin-bottom:16px"><div class="pg-box"><div>' +
       '<div class="field-label">진행 상태</div><div class="pg-pick">' +
       PG_KEYS.map(function (k) {
-        return '<button type="button" data-pg="' + k + '"' + (p.s === k ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + pgBadge(k) + "</button>";
+        return '<button type="button" data-pg="' + k + '"' + ro + (p.s === k ? ' class="on" aria-pressed="true"' : ' aria-pressed="false"') + ">" + pgBadge(k) + "</button>";
       }).join("") + "</div>" +
       (p.t ? '<div class="muted small" style="margin-top:6px">마지막 변경 ' + when(p.t) + "</div>" : "") +
       '</div><div><div class="field-label">인계 메모 (300자) — <b>이름·연락처·주소 등 개인정보를 넣지 마세요</b></div>' +
-      '<textarea class="memo" id="pg-memo" maxlength="300" placeholder="예: 시행령 입법예고 나오면 용도 기준 다시 확인">' + esc(p.memo || "") + "</textarea>" +
+      '<textarea class="memo" id="pg-memo" maxlength="300"' + (ro ? " readonly" : "") + ' placeholder="예: 시행령 입법예고 나오면 용도 기준 다시 확인">' + esc(p.memo || "") + "</textarea>" +
       '<div class="pii-warn" id="pg-warn"></div>' +
       ((p.log && p.log.length) ? '<ul class="log">' + p.log.slice().reverse().map(function (l) {
         return "<li>" + when(l[0]) + " · " + esc(l[1]) + "</li>";
-      }).join("") + "</ul>" : "") + "</div></div></div>";
+      }).join("") + "</ul>" : "") + "</div></div>" + Cloud.progressExtra(no) + "</div>";
   }
   function bindProgressBox(no, rerender) {
+    Cloud.bindProgressExtra(no);
+    if (Cloud.readOnly()) return;
     document.querySelectorAll("#pg-card [data-pg]").forEach(function (b) {
       b.addEventListener("click", function () { setPg(no, b.getAttribute("data-pg")); rerender(); });
     });
@@ -810,6 +818,11 @@
     });
   }
 
+  // 비슷한 법안 (web/similar.js). 질의 도우미를 끄면 외부 서버에 묻지 않고 화면 안에서 계산
+  function fillSimilar(no) {
+    Similar.fill(no, { api: prefs.ai ? API_BASE : null, D: D });
+  }
+
   function viewBill(no) {
     var b = D.byNo[no];
     if (!b) { $view.innerHTML = "<p>의안번호 " + esc(no) + '를 찾지 못했습니다. <a href="#/bills">목록으로</a></p>'; return; }
@@ -826,11 +839,12 @@
         '<div class="note-box">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않아 건물 판정이 없습니다. ' +
         "AI 기준 추출 단계에서 판정할 예정입니다.</div>" +
         '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>" +
-        '<div id="xc-box"></div>';
+        '<div id="xc-box"></div><div id="similar-box"></div>';
       bindProgressBox(no, rerender);
       bindAskThis(no);
       bindAgent(no);
       fillCross(no);
+      fillSimilar(no);
       return;
     }
 
@@ -857,7 +871,7 @@
       html += '<div class="card"><h3 style="margin-top:0">결론과 사유별 동수</h3><p style="margin:0 0 10px">' + esc(demo.conclusion) + "</p>" +
         reasonTable(J) + "</div>";
       html += "</div>";
-      html += '<div id="xc-box"></div>';
+      html += '<div id="xc-box"></div><div id="similar-box"></div>';
 
       html += "<h3>건물 명부</h3>";
       html += '<p class="small muted" style="margin:-4px 0 8px">확인 결과를 기록하면 적중률이 나옵니다 (온지붕 현장 확인 방식). ' +
@@ -877,6 +891,7 @@
       bindAskThis(no);
       bindAgent(no);
       fillCross(no);
+      fillSimilar(no);
       document.getElementById("r-csv").addEventListener("click", function () {
         var rows = J.rows.filter(function (r) { return r.status === ui.roster.tab; });
         var c = checks[no] || {};
@@ -1073,7 +1088,10 @@
     D.bills.forEach(function (b) { cnt[pgOf(b.no)]++; });
     var active = D.bills.filter(function (b) { return pgOf(b.no) !== "todo" || (progress[b.no] && progress[b.no].memo); })
       .sort(function (a, b) { return ((progress[b.no] || {}).t || "") > ((progress[a.no] || {}).t || "") ? 1 : -1; });
-    var html = '<h2>진행 현황</h2><p class="lead">법안 검토가 어디까지 됐는지. 기록은 이 브라우저에만 저장되므로, 담당자끼리는 CSV로 주고받습니다.</p>';
+    var html = '<h2>진행 현황</h2><p class="lead">법안 검토가 어디까지 됐는지. ' + (Cloud.active()
+      ? "기록은 클라우드(시연용)에 저장되어 구성원이 함께 봅니다.</p>"
+      : "기록은 이 브라우저에만 저장되므로, 담당자끼리는 CSV로 주고받습니다.</p>");
+    html += Cloud.panelHtml(); // 클라우드 로그인·역할·결재 대기 (키가 없으면 빈 문자열)
     html += '<div class="kpis">' + PG_KEYS.map(function (k) {
       return kpi(PG[k].label, fmt(cnt[k]) + "건", k === "done" ? "결재 대기" : k === "hold" ? "시행령 확정 등을 기다림" :
         k === "doing" ? "담당자가 보고 있음" : "계류 법안 " + fmt(D.bills.length) + "건 중", k === "done" && cnt.done > 0);
@@ -1087,10 +1105,11 @@
         var p = progress[b.no] || {}, d = D.demos[b.no];
         return "<tr><td>" + pgMark(b.no) + "</td><td>" + esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) +
           "</a></td><td class=\"small\">" + (d ? "대상 " + fmt(d.counts.대상) + " · 경계선 " + fmt(d.counts.경계선) + " · 판정불가 " + fmt(d.counts.판정불가) : "기준 추출 대기") +
-          '</td><td class="small">' + esc(p.memo || "") + '</td><td class="small muted">' + when(p.t) + "</td></tr>";
+          '</td><td class="small">' + esc(p.memo || "") + '</td><td class="small muted">' + when(p.t) + Cloud.whoCell(b.no) + "</td></tr>";
       }).join("") || '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 법안 상세에서 진행 상태를 바꾸거나, 목록에서 여러 건을 체크해 한꺼번에 바꿀 수 있습니다.</td></tr>') +
       "</tbody></table></div>";
     $view.innerHTML = html;
+    Cloud.bindPanel();
 
     document.getElementById("pg-export").addEventListener("click", function () {
       downloadCSV("빼곡_검토기록_" + stamp() + ".csv", ["의안번호", "법안명", "진행", "메모", "마지막 변경"],
@@ -1106,9 +1125,10 @@
         var rows = parseCSV(text), head = rows.shift() || [];
         var iNo = head.indexOf("의안번호"), iPg = head.indexOf("진행"), iMemo = head.indexOf("메모"), iT = head.indexOf("마지막 변경");
         if (iNo < 0 || iPg < 0) throw new Error("의안번호·진행 열이 있는 CSV가 아닙니다");
+        if (Cloud.readOnly()) throw new Error("결재자는 진행 기록을 바꿀 수 없습니다");
         var byLabel = {};
         PG_KEYS.forEach(function (k) { byLabel[PG[k].label] = k; });
-        var n = 0, skipped = 0;
+        var n = 0, skipped = 0, imported = [];
         rows.forEach(function (r) {
           var no = (r[iNo] || "").trim(), s = byLabel[(r[iPg] || "").trim()];
           if (!D.byNo[no] || !s) return;
@@ -1119,7 +1139,9 @@
           if (cur && cur.t && cur.t > t) return; // 더 최근 기록이 있으면 그대로 둠
           progress[no] = { s: s, memo: memo, t: t, log: ((cur && cur.log) || []).concat([[new Date().toISOString(), "CSV 가져오기: " + PG[s].label]]).slice(-30) };
           n++;
+          imported.push(no);
         });
+        Cloud.pushMany(imported); // 클라우드 모드(담당자)면 가져온 줄을 클라우드에도 저장
         save("progress", progress);
         drawSideProgress();
         viewProgress();
@@ -1232,6 +1254,8 @@
       "<li><b>수집하지 않는 것</b>: 건물명, 소유자, 주소, 지번 상세. 건물은 PNU(필지 고유번호)와 대장 속성만 씁니다.</li>" +
       "<li><b>이 브라우저에만 저장</b>: 역할·모드 선택, 진행 상태, 인계 메모, 건물 확인 결과, 검토서의 부서·직위. 서버로 보내지 않습니다.</li>" +
       "<li><b>메모</b>: 전화번호·주민등록번호·이메일로 보이는 내용은 저장하지 않습니다. 이름·주소도 넣지 마세요.</li>" +
+      (Cloud.enabled() ? "<li><b>검토 공유(로그인한 구성원만)</b>: 진행 상태·인계 메모·수정자 이메일·시각을 시연용 클라우드 DB(Supabase)에 저장합니다. " +
+        "구성원끼리만 읽을 수 있고, 다른 사람의 이메일은 화면에 아이디 앞 두 글자만 보입니다. 실제 도입 시 기관 내부 DB로 바꿉니다.</li>" : "") +
       "<li><b>질의 도우미</b>: 질문과 공개 법안 자료만 별도 서버를 거쳐 OpenAI로 보냅니다. 개인정보가 든 질문은 서버에서 거절합니다. 질문을 저장하지 않습니다.</li>" +
       "<li><b>공개 범위</b>: 시연용 공개 화면입니다. 도입 시 행정망 내부 전용으로 운영합니다.</li>" +
       "</ul><div style=\"text-align:right\"><button type=\"button\" class=\"btn\" data-close>닫기</button></div>");
@@ -1544,6 +1568,27 @@
     window.scrollTo(0, 0);
   }
 
+  // 검토 진행 공유 (web/cloud.js). 키가 없거나 로그인 전이면 지금처럼 이 브라우저 기록만 쓴다
+  function initCloud() {
+    Cloud.init({
+      PG: PG, PII: PII,
+      getProgress: function () { return progress; },
+      setProgress: function (obj) { progress = obj; },
+      localProgress: function () { return load("progress", {}); },
+      updateProgress: function (no, p) { progress[no] = p; },
+      billName: function (no) { return D.byNo[no] ? D.byNo[no].name : no; },
+      validNo: function (no) { return !!D.byNo[no]; },
+      refresh: function () {
+        drawSideProgress();
+        var a = document.activeElement; // 입력 중이면 화면을 다시 그리지 않는다
+        if (a && (a.tagName === "TEXTAREA" || a.tagName === "INPUT")) return;
+        var y = window.scrollY;
+        route();
+        window.scrollTo(0, y);
+      },
+    });
+  }
+
   function showError(err) {
     console.error(err);
     $view.innerHTML = "<p>데이터를 불러오지 못했습니다: " + esc(err.message) + "</p>";
@@ -1575,5 +1620,6 @@
       route();
     }
     applyAi();
+    initCloud();
   }).catch(showError);
 })();

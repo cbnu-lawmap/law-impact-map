@@ -513,3 +513,18 @@ body.no-ai .ai-only { display: none !important; }
   .status #st-ai { display: none; }
   .headline p { font-size: var(--fs-lg); }
 }
+
+/* 검토 진행 공유 (web/cloud.js, 시연용 클라우드 DB) */
+.cloud-chip { text-decoration: none; cursor: pointer; }
+.cloud-panel { margin: 12px 0 16px; }
+.cloud-banner { font-size: var(--fs-xs); color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn-line); border-radius: var(--r-sm); padding: 4px 8px; display: inline-block; margin-bottom: 8px; }
+.cloud-login { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.cloud-login input { min-width: 220px; flex: 1 1 220px; }
+.cloud-who, .cloud-import { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.cloud-who .spacer { flex: 1; }
+.cloud-extra { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+/* 비슷한 법안 (web/similar.js) */
+.sim-grid { margin-top: 16px; }
+.sim-list { list-style: none; margin: 8px 0 0; padding: 0; }
+.sim-list li { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.sim-list li:last-child { border-bottom: 0; }

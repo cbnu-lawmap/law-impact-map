@@ -46,6 +46,22 @@ jobs:
           else
             echo "VWORLD_KEY secret not set: basic map only"
           fi
+      # Supabase 공개(anon/publishable) 키. RLS 로 막힌 범위만 쓸 수 있는 키라 화면에 들어가도 되지만
+      # 저장소에는 넣지 않고 배포본에만 넣는다. 없으면 화면은 지금처럼 이 브라우저(localStorage)에만 저장한다.
+      # 서비스 키(service_role)는 여기 넣지 않는다 (Vercel·Actions 전용)
+      - name: Insert Supabase anon key
+        env:
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -n "$SUPABASE_ANON_KEY" ]; then
+            case "$SUPABASE_ANON_KEY" in
+              *[!A-Za-z0-9._-]*) echo "SUPABASE_ANON_KEY has unexpected characters: not inserted"; exit 0 ;;
+            esac
+            sed -i "s|__SUPABASE_ANON_KEY__|${SUPABASE_ANON_KEY}|" web/config.js
+            echo "Supabase anon key inserted"
+          else
+            echo "SUPABASE_ANON_KEY secret not set: progress stays in each browser"
+          fi
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web
