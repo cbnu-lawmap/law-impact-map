@@ -142,6 +142,14 @@ law-impact-map/
 
 예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 법안명·요약문 단어 일치) 찾은 법안 내용만 근거로 답을 생성합니다. 법안 상세의 "비슷한 법안"은 요약문 임베딩(`paraphrase-multilingual-MiniLM-L12-v2`, Supabase pgvector)으로 찾고, 안 되면 단어 유사도(TF-IDF)로 대신하며 어느 방법을 썼는지 화면에 표시합니다. 두 방법 비교는 [docs/similar_compare.md](docs/similar_compare.md) (숫자는 `collect/compare_similar.py` 가 씀).
 
+| 비슷한 법안 찾기 (같은 법률 법안 691건) | top-3 적중률 | top-1 적중률 |
+| :--- | ---: | ---: |
+| 단어 유사도(TF-IDF) | 88.6% | 73.2% |
+| 의미 검색(pgvector 임베딩) | 70.6% | 50.7% |
+| 하이브리드: 단어 + 의미 결합(RRF, k=60) | 83.8% | 67.4% |
+
+규칙(결합 top-3 ≥ TF-IDF top-3 이면 결합)에 따라 서버 기본 방법은 단어 유사도(TF-IDF)입니다 (`web/data/similar_method.json`).
+
 <br />
 
 ## 🧠 AI·학습 모델

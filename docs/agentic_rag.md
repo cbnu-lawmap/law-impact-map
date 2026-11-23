@@ -33,16 +33,25 @@ Agentic RAG  요약 찾기 → 근거 평가(코드) ─ 충분 ─────�
 | `summary` | 제안이유 전문 (없으면 300자 요약) | `web/data/summaries.json` |
 | `bill_text` | 법안 원문의 **개정 부분**만 (개정문 안의 새 글. 제안이유·정의 조문·부칙·신구조문대비표 뺌, `criteria.js` 의 `amendedText`) | `web/data/bill_docs.json` |
 | `review_report` | 검토보고서에서 건물 기준 낱말(연면적·층·용도·위임 문구 등)이 든 문장, 3,000자까지 | `web/data/bill_docs.json` |
-| `similar_rules` | 제안이유가 비슷한 시범 법안 3건의 규칙 | `demo_rules.json` + TF-IDF |
+| `similar_rules` | 제안이유가 비슷한 시범 법안 3건의 규칙 | `demo_rules.json` + TF-IDF (측정 결과가 결합이면 TF-IDF·pgvector RRF) |
 
 - 자료가 없으면 `found: false`, 글은 「없음」이다. 출처 없음도 재검색 한 번으로 센다.
 - `web/data/bill_docs.json` 은 `node server/scripts/build-bill-docs.js` 가 `data/bill_docs/*.txt` 에서 만든다 (36건, 약 85KB). 사람 이름이 나올 수 있는 문장(의원·전문위원·조사관·위원장·대표발의)은 싣지 않는다. `npm test` 가 파일이 최신인지 확인한다. 원문·검토보고서는 시범 26건과 곧 통과 후보 10건만 있고, 2207658(나중에 넣은 시범 법안)은 없다.
-- `similar_rules` 는 `createSimilarRules(D)` 가 만든 함수 `similarRules(no, k)` 하나로 되어 있다 (문자 2~3글자 TF-IDF, 코사인 유사도). 나중에 pgvector 로 바꿀 때는 같은 모양(`[{no, title, score, rule, label}]`)을 돌려주는 함수를 `D.similarRules` 에 넣으면 된다.
+- `similar_rules` 는 `createSimilarRules(D)` 가 만든 함수 `similarRules(no, k)` 하나로 되어 있다 (문자 2~3글자 TF-IDF, 코사인 유사도). agentic 요청에서는 `api/agent.js` 의 `withVectorRules` 가 비슷한 법안 찾기(`server/lib/similar.js`)와 같은 방법을 따른다: 기본 방법이 `tfidf` 면 이 TF-IDF 그대로, `hybrid` 면 시범 법안 중 pgvector 상위 20 과 TF-IDF 순위를 RRF 로 합친 3건 (같은 모양 `[{no, title, score, rule, label}]`).
+- 기본 방법은 손이 아니라 측정으로 정한다. `collect/compare_similar.py` (GitHub Actions `embed-bills.yml`) 가 같은 법률 법안 691건에서 잰 값 ([similar_compare.md](similar_compare.md)):
+
+  | 방법 | top-3 적중률 | top-1 적중률 |
+  | :--- | ---: | ---: |
+  | 단어 유사도(TF-IDF) | 88.6% | 73.2% |
+  | 의미 검색(pgvector 임베딩) | 70.6% | 50.7% |
+  | 하이브리드: 단어 + 의미 결합(RRF, k=60) | 83.8% | 67.4% |
+
+  규칙 「결합 top-3 ≥ TF-IDF top-3 이면 hybrid」 에 따라 지금 기본 방법은 `tfidf` 다 (`web/data/similar_method.json`, 환경변수 `SIMILAR_METHOD` 로 바꿀 수 있음).
 - 비슷한 법안의 규칙은 언제나 **「후보 규칙, 사람 확인 필요」** 표시만 붙여 보여 준다. 판정 규칙에 넣지 않고, 모델이 `judge_buildings` 에 넘기면 「후보 규칙은 사람 확인 전이라 판정에 쓰지 않습니다」로 거절한다.
 
 ## 3. 근거 평가 규칙 (`evaluate_evidence`, 코드만)
 
-기준(용도·연면적·층수·사용승인)마다 출처 하나의 글로 셋 중 하나로 나눈다. 모델 결과는 후보일 뿐이고, 상태는 아래 코드 규칙으로만 정한다.
+기준(용도·연면적·층수·세대수·사용승인)마다 출처 하나의 글로 셋 중 하나로 나눈다. 모델 결과는 후보일 뿐이고, 상태는 아래 코드 규칙으로만 정한다.
 
 | 상태 | 조건 |
 |---|---|
