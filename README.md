@@ -119,7 +119,7 @@ flowchart LR
   S4 -- "서비스 키<br/>progress_set · progress_decide" --> P1
   E1[embed_bills.py<br/>Actions embed-bills.yml] -- 서비스 키 --> P2
   D --> E1
-  S3 -- "similar_bills()<br/>실패하면 TF-IDF" --> P2
+  S3 -- "결합(RRF) 방식일 때만<br/>similar_bills()" --> P2
   S2 -. 실행 기록 .-> P3
 ```
 
@@ -145,7 +145,7 @@ law-impact-map/
 └─ .github/workflows/  # pages.yml(배포), daily-collect.yml(매일 새 법안 수집), embed-bills.yml(법안 임베딩·비교)
 ```
 
-예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 법안명·요약문 단어 일치) 찾은 법안 내용만 근거로 답을 생성합니다. 법안 상세의 "비슷한 법안"은 요약문 임베딩(`paraphrase-multilingual-MiniLM-L12-v2`, Supabase pgvector)으로 찾고, 안 되면 단어 유사도(TF-IDF)로 대신하며 어느 방법을 썼는지 화면에 표시합니다. 두 방법 비교는 [docs/similar_compare.md](docs/similar_compare.md) (숫자는 `collect/compare_similar.py` 가 씀).
+예전 계획의 `backend/`(RAG API)와 `frontend/`는 실제로 만들지 않아 지웠습니다. 서버 코드는 `server/`, 화면은 `web/`에 있습니다. 질의 도우미는 13주차의 검색 증강 생성(RAG) 구조입니다: 질문과 관련된 법안을 먼저 찾고(검색, 법안명·요약문 단어 일치) 찾은 법안 내용만 근거로 답을 생성합니다. 법안 상세의 "비슷한 법안"은 측정에서 가장 잘 맞은 단어 유사도(TF-IDF)로 찾습니다. 요약문 임베딩(`paraphrase-multilingual-MiniLM-L12-v2`, Supabase pgvector)과 둘을 합친 결합(RRF)도 같은 691건으로 재서 비교했고, 어느 방법을 썼는지 화면에 표시합니다. 세 방법 비교는 [docs/similar_compare.md](docs/similar_compare.md) (숫자는 `collect/compare_similar.py` 가 씀).
 
 | 비슷한 법안 찾기 (같은 법률 법안 691건) | top-3 적중률 | top-1 적중률 |
 | :--- | ---: | ---: |
