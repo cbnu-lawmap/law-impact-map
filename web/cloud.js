@@ -420,6 +420,27 @@
     }).catch(function () { /* 집계를 못 받으면 카드를 그리지 않는다 */ });
   }
 
+  // ------------------------------------------------------------ 시연 초기화 (admin.html#reset 에서만)
+  // 서버가 진행 기록·결재 기록을 지운 뒤, 클라우드 모드면 다시 읽어 화면을 고친다
+  function resetDemo() {
+    return fetch(apiUrl(), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "reset", confirm: "초기화" }) })
+      .catch(function () { throw new Error("저장 서버에 연결하지 못했습니다"); })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (!r.ok) throw new Error(j.error || "초기화하지 못했습니다 (" + r.status + ")");
+          return j.reset || {};
+        });
+      })
+      .then(function (x) {
+        if (!ready() || !sb) return x;
+        return loadRows().then(function () {
+          hooks.setProgress(cloudProgress());
+          drawBar();
+          return x;
+        }, function () { return x; });
+      });
+  }
+
   // ------------------------------------------------------------ 바깥에 보이는 것
   window.Cloud = {
     BANNER: BANNER,
@@ -447,5 +468,6 @@
     bindProgressExtra: bindProgressExtra,
     whoCell: whoCell,
     fillStats: fillStats,
+    resetDemo: resetDemo,
   };
 })();

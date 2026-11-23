@@ -168,6 +168,39 @@ const DECIDE = (o) => Object.assign({ action: "decide", role: "결재자", name:
     assert.strictEqual(r.code, 503);
   });
 
+  await test("시연 초기화: 확인 문구가 틀리면 400, 허용하지 않은 사이트 403, 맞으면 rpc progress_reset", async () => {
+    fakeDb(() => ({ status: 200, json: { progress: 12, log: 40, runs_reset: 3 } }));
+    assert.strictEqual((await call({ action: "reset" })).code, 400);
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화 " })).code, 400);
+    const bad = await call({ action: "reset", confirm: "reset" });
+    assert.strictEqual(bad.code, 400);
+    assert.ok(/확인 문구/.test(bad.json.error), bad.json.error);
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화" }, { origin: "https://evil.example" })).code, 403);
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화" }, { origin: "" })).code, 403);
+    assert.strictEqual(calls.length, 0);
+    // 역할·이름 없이 확인 문구만으로
+    const r = await call({ action: "reset", confirm: "초기화" });
+    assert.strictEqual(r.code, 200, JSON.stringify(r.json));
+    assert.deepStrictEqual(r.json, { ok: true, reset: { progress: 12, log: 40, runs_reset: 3 } });
+    assert.strictEqual(calls.length, 1);
+    assert.strictEqual(calls[0].url, "https://example.supabase.co/rest/v1/rpc/progress_reset");
+    assert.deepStrictEqual(calls[0].body, {});
+  });
+
+  await test("시연 초기화: 같은 IP 1분 2회까지 (세 번째 429)", async () => {
+    fakeDb(() => ({ status: 200, json: { progress: 0, log: 0, runs_reset: 0 } }));
+    const ip = "10.77.0.1";
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화" }, { ip })).code, 200);
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화" }, { ip })).code, 200);
+    assert.strictEqual((await call({ action: "reset", confirm: "초기화" }, { ip })).code, 429);
+    assert.strictEqual(calls.length, 2);
+  });
+
+  await test("시연 초기화: DB 키가 없으면 503", async () => {
+    const r = await call({ action: "reset", confirm: "초기화" });
+    assert.strictEqual(r.code, 503);
+  });
+
   KEYS.forEach((k) => { delete process.env[k]; if (saved[k] !== undefined) process.env[k] = saved[k]; });
   if (fail) { console.log(fail + "건 실패"); process.exit(1); }
   console.log("진행 저장 시험 모두 통과");

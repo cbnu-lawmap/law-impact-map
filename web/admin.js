@@ -1526,6 +1526,8 @@
   // 기준별 근거 평가 (코드 규칙), 재검색으로 확인한 기준, 후보 규칙
   function evalHtml(j) {
     var html = "";
+    // 제안이유의 현행법 설명 문장에서 나온 수치 (판정에 쓰지 않음). 예: 세대수 현행 300세대 이상 → 개정 30세대 이상
+    if (j.extraction && j.extraction.current_line) html += '<p class="small muted" style="margin:8px 0 0">현행 기준 (판정에 쓰지 않음): ' + esc(j.extraction.current_line) + "</p>";
     if (j.evaluation && j.evaluation.length) {
       html += '<div class="field-label" style="margin-top:10px">기준별 근거 평가 (코드 규칙: 원문 대조, 수치·단위, 개정문 여부)</div>' +
         '<div class="table-wrap"><table class="dt"><thead><tr><th>기준</th><th>평가</th><th>출처</th><th>근거 문구</th></tr></thead><tbody>' +
@@ -1646,6 +1648,30 @@
       });
   }
 
+  // ---------------------------------------------------------------- 시연 초기화 (숨은 메뉴: admin.html#reset)
+  // 시연 전용. server/api/progress.js 의 action "reset" 을 부른다 (확인 문구 "초기화", 1분 2회). 두 번 눌러야 실행한다
+  function viewReset() {
+    $view.innerHTML = '<h2>시연 초기화</h2><div class="card"><p>시연 초기화: 모든 진행 기록과 결재 기록을 지웁니다.</p>' +
+      '<p class="small muted">시연 전용입니다. 에이전트 실행 기록은 남기고 사람 수정 표시만 되돌립니다. 지운 기록은 되살릴 수 없습니다.</p>' +
+      '<p><button type="button" class="btn" id="reset-1">초기화</button> <button type="button" class="btn" id="reset-2" style="display:none">정말 모두 지우기</button> ' +
+      '<button type="button" class="btn ghost" id="reset-no" style="display:none">그만두기</button></p><p class="small" id="reset-msg" aria-live="polite"></p></div>';
+    var b1 = document.getElementById("reset-1"), b2 = document.getElementById("reset-2"), no = document.getElementById("reset-no"), msg = document.getElementById("reset-msg");
+    function show(el, on) { el.style.display = on ? "" : "none"; } // .btn 의 display 가 hidden 속성보다 앞서므로 style 로 숨긴다
+    b1.addEventListener("click", function () { show(b1, false); show(b2, true); show(no, true); msg.textContent = "한 번 더 누르면 지웁니다."; });
+    no.addEventListener("click", function () { show(b1, true); show(b2, false); show(no, false); msg.textContent = ""; });
+    b2.addEventListener("click", function () {
+      b2.disabled = true; show(no, false);
+      msg.textContent = "지우는 중…";
+      Cloud.resetDemo().then(function (x) {
+        msg.textContent = "초기화했습니다. 진행 기록 " + (x.progress != null ? x.progress : "?") + "건, 결재·변경 기록 " + (x.log != null ? x.log : "?") + "건을 지웠습니다.";
+        show(b2, false);
+      }).catch(function (e) {
+        msg.textContent = "초기화하지 못했습니다: " + e.message;
+        b2.disabled = false; show(no, true);
+      });
+    });
+  }
+
   // ---------------------------------------------------------------- 라우터
   function route() {
     var h = location.hash.replace(/^#/, "") || "/";
@@ -1656,6 +1682,7 @@
     else if (h === "/progress") { key = "progress"; viewProgress(); }
     else if (h === "/rules") { key = "rules"; viewRules(); }
     else if (h === "/sources") { key = "sources"; viewSources(); }
+    else if (h === "reset" || h === "/reset") { key = ""; viewReset(); } // 숨은 메뉴 (어디에도 링크하지 않음)
     else viewHome();
     document.querySelectorAll("#nav a").forEach(function (a) {
       a.classList.toggle("active", a.getAttribute("data-route") === key);
