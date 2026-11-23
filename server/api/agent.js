@@ -151,7 +151,9 @@ const EXTRACT_PROMPT =
   "quote 는 요약 원문을 한 글자도 바꾸지 말고 그대로 옮긴 160자 이내 문구. 용도 value 는 주용도 코드 배열 (" +
   Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자, 세대수는 세대 수 숫자 (quote 에 '30세대' 처럼 수치와 '세대' 가 붙어 있어야 함). " +
   "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
-  "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.";
+  "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다. " +
+  "items 에는 이 법안이 바꾸려는(개정) 기준만 넣는다. '현행법은', '현행', '규정하고 있으나' 처럼 지금 법을 설명하는 문장과 통계·배경 문장(%, 비율, 건수, '~에 달함', '~로 나타남')의 수치는 items 에 넣지 않는다. " +
+  "지금 법의 기준은 넣고 싶으면 {\"current\":[같은 형식]} 로 따로 낸다 (판정에 쓰지 않음).";
 
 // ---------------------------------------------------------------- 모델 (OpenAI 또는 시험용 가짜)
 function mockAllowed() {
@@ -260,6 +262,11 @@ function mockLLM() {
 }
 
 // ---------------------------------------------------------------- 한 번 실행
+function currentLineOf(v) {
+  const cur = {};
+  Object.keys(v.current || {}).forEach((a) => { cur[a] = { value: v.current[a] }; });
+  return Sources.currentLine(cur, v.rule);
+}
 function fmt(n) { return Number(n).toLocaleString("ko-KR"); }
 
 // 건물을 실제로 가를 수 있는 기준(용도·연면적·층수·세대수·사용승인)이 하나라도 있는지. 위임만 있거나 비어 있으면 false
@@ -415,6 +422,8 @@ async function run(D, no, note, llm) {
     state.extraction = {
       method: how, model: llm.name, candidates_n: cands.length, passed: v.evidence.length,
       dropped: v.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: v.rule,
+      // 현행법 설명 문장의 수치 (판정에 쓰지 않는 참고). 화면에서 "현행 300세대 이상 → 개정 30세대 이상" 으로 보인다
+      current: v.current, current_line: currentLineOf(v) || null,
     };
     // 위임 문구는 모델과 상관없이 원문에서 코드로 찾는다 (모델이 빠뜨려도 같은 결과)
     state.delegation = Criteria.findDelegation(fullText).map((d) => ({ value: d.value, by: d.by, quote: d.quote }));
@@ -431,6 +440,8 @@ async function run(D, no, note, llm) {
       plan_note: state.plan.note || null,
       evidence: v.evidence,
       dropped: v.dropped,
+      current: v.current,
+      current_line: currentLineOf(v) || null,
       demo_rule: demo ? { rule: demo.rule, source_text: demo.source_text, method: demo.method, note: "판정 시범 규칙 (데이터 만들 때 전체 요약 원문과 대조 통과)" } : null,
     };
   }
@@ -577,7 +588,8 @@ async function run(D, no, note, llm) {
         (r.dropped.length ? ", 근거가 맞지 않아 버린 기준 " + r.dropped.length + "개" : "") +
         notInQuote(r.dropped) + (r.demo_rule ? ", 판정 시범 규칙 있음" : "") +
         (r.delegation && r.delegation.length ? " · " + DELEG_CHECKED + " (" + Array.from(new Set(r.delegation.map((d) => d.by + "으로 정하는 " + d.value))).join(", ") + ")" : "") +
-        (r.plan_note ? " · " + r.plan_note : "");
+        (r.plan_note ? " · " + r.plan_note : "") +
+        (r.current_line ? " · 현행 기준은 판정에 쓰지 않음 (" + r.current_line + ")" : "");
     }
     if (name === "crosscheck") return r.summary;
     if (name === "judge_buildings") {

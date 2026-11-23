@@ -17,7 +17,9 @@ const full = JSON.parse(fs.readFileSync(path.join(ROOT, "web", "data", "summarie
 
 const cases = [];
 function add(name, text, candidates) {
-  cases.push({ name, text, candidates, expected: Criteria.verify(candidates, text) });
+  // 노트북의 파이썬 verify 는 기본 대조(문구·수치·단위)만 옮겼다. 현행·개정 문장 나누기(sentences)는 서버에서만 더 거른다
+  const { rule, evidence, dropped } = Criteria.verify(candidates, text, { sentences: false });
+  cases.push({ name, text, candidates, expected: { rule, evidence, dropped } });
 }
 
 // test/*.js 에 있는 사례

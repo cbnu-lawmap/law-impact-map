@@ -152,11 +152,105 @@ function findDelegation(summary) {
   return out;
 }
 
-/** 후보마다 원문 대조. 통과한 것만 규칙으로 묶는다. */
-function verify(candidates, summary) {
+// ---------------------------------------------------------------- 현행·개정·통계 문장 나누기
+/*
+ * 제안이유에는 지금 법 설명(현행), 통계·배경, 바꾸려는 내용(개정)이 섞여 있다. 수치 기준은 개정 내용에서만 받는다.
+ * 문장은 ". " 에서 나누고 (quoteAround 와 같은 경계), 한 문장 안에서도 "…으나, " "…지만, " 뒤에서 한 번 더 나눈다
+ * ("현행법은 300세대 이상으로 하고 있으나, 이를 30세대 이상으로 확대하려는 것임" 의 앞뒤를 따로 본다).
+ * 조각마다 아래 순서로 처음 맞는 종류를 붙인다.
+ *   1. 개정 (강)   하려는 것 · 하려 함 · 하고자 함 · 개정안은 · (안 제N조)
+ *   2. 현행        현행 · 현재는 · 종전에는 · 으로 되어 있 · 하고 있으나 · 규정하고 있(규정하고 있어 포함) · 정하고 있
+ *   3. 통계·배경   에 달함 · 로 나타남 · 로 조사 · N% · 퍼센트 · 비율 · 건수 · 연도별 · 차지하고 · 지적이 · 의견이 있 · 필요가 있다는 · 상황임 · 실정임
+ *   4. 개정 (약)   확대 · 신설 · 상향 · 하향 · 강화 · 완화 · 개정 · 하도록 함
+ *   5. 기타
+ * 수치 기준(연면적·층수·세대수·사용승인)은
+ *   - 현행 조각의 수치는 판정 규칙에 넣지 않고 current(현행 기준, 참고)로 따로 둔다
+ *   - 통계·배경 조각의 수치는 버린다
+ *   - 기타 조각의 수치는 같은 기준이 개정 조각에 없을 때만 받는다 (개정 조각에 있으면 그것만)
+ */
+const SENT_ATTRS = ["연면적", "층수", "세대수", "사용승인"];
+const KIND_AMEND = "개정", KIND_CURRENT = "현행", KIND_STAT = "통계·배경", KIND_OTHER = "기타";
+const WHY_CURRENT = "현행 기준 설명 문장";
+const WHY_STAT = "통계·배경 문장";
+const WHY_OTHER = "개정 문장에 같은 기준이 있어 기타 문장 값은 쓰지 않음";
+const SENT_RULES = [
+  [KIND_AMEND, /하려는\s*것|하려\s*함|하려고\s*함|하고자\s*함|하고자\s*하는\s*것|개정안은|\(\s*안\s*제\s*\d+\s*조/],
+  [KIND_CURRENT, /현행|현재는|종전에는|종전의\s*규정|(?:으로|로)\s*되어\s*있|하고\s*있으나|규정하고\s*있|정하고\s*있/],
+  [KIND_STAT, /에\s*달하|에\s*달함|(?:으로|로)\s*나타나|(?:으로|로)\s*나타남|(?:으로|로)\s*조사|\d\s*%|퍼센트|비율|건수|연도별|차지하고|지적이|지적도|의견이\s*있|필요가\s*있다는|상황임|실정임/],
+  [KIND_AMEND, /확대|신설|상향|하향|강화|완화|개정|하도록\s*함/],
+];
+function sentenceKind(s) {
+  const hit = SENT_RULES.find(([, re]) => re.test(s));
+  return hit ? hit[0] : KIND_OTHER;
+}
+
+/** 글을 문장(조각)으로 나누고 종류를 붙인다: [{text, kind, start, end}] (start·end 는 normText 한 글 안의 위치) */
+function classifySentences(text0) {
+  const text = normText(text0);
+  const out = [];
+  const cut = /\.\s+|(?:으나|지만),\s+/g;
+  let start = 0, m;
+  while ((m = cut.exec(text))) {
+    const end = m.index + m[0].length;
+    out.push({ start, end });
+    start = end;
+  }
+  if (start < text.length) out.push({ start, end: text.length });
+  return out.map((p) => {
+    const t = text.slice(p.start, p.end).trim();
+    return { text: t, kind: sentenceKind(t), start: p.start, end: p.end };
+  }).filter((p) => p.text);
+}
+
+// 후보 수치가 근거 문구 안 어디에 있는지 (세대수는 "N세대", 층수는 "N층", 사용승인은 "N년", 연면적은 수치)
+function valueRe(c) {
+  const forms = c.attr === "사용승인" ? [String(Number(REF_DATE.slice(0, 4)) - Number(String(c.value).slice(0, 4)))] : numberForms(c.value);
+  const unit = c.attr === "세대수" ? "\\s*세대" : c.attr === "층수" ? "\\s*층" : c.attr === "사용승인" ? "\\s*년" : "";
+  return new RegExp("(?<![\\d,])(?:" + forms.map(escapeRe).join("|") + ")(?![\\d,])" + unit, "g");
+}
+/** 후보 하나가 놓인 문장 종류들 (근거 문구가 원문에 나오는 모든 자리, 그 안에서 수치가 있는 조각) */
+function candidateKinds(c, text, sents) {
+  const quote = normText(c.quote);
+  const kinds = new Set();
+  let at = text.indexOf(quote);
+  while (at >= 0) {
+    const re = valueRe(c);
+    let m, found = false;
+    while ((m = re.exec(quote))) {
+      found = true;
+      const pos = at + m.index;
+      const s = sents.find((x) => pos >= x.start && pos < x.end);
+      if (s) kinds.add(s.kind);
+    }
+    if (!found) { const s = sents.find((x) => at >= x.start && at < x.end); if (s) kinds.add(s.kind); }
+    at = text.indexOf(quote, at + 1);
+  }
+  return kinds;
+}
+
+/**
+ * 후보마다 원문 대조. 통과한 것만 규칙으로 묶는다.
+ * opts.sentences (기본 true): 위 현행·개정 문장 나누기를 쓴다. 현행 문장의 수치는 current 로 따로 돌려준다.
+ *   의안 원문의 개정 부분(amendedText)은 이미 고친 뒤 글만이라 false 로 부른다.
+ *   data/verify_cases.json (노트북 파이썬 대조와 맞추는 사례) 도 false 로 만든다.
+ * 돌려줌: { rule, evidence, dropped, current }
+ */
+function verify(candidates, summary, opts = {}) {
   const text = normText(summary);
-  const rule = {}, evidence = [], dropped = [];
-  candidates.forEach((c0) => {
+  const useSent = opts.sentences !== false;
+  const sents = useSent ? classifySentences(text) : [];
+  const rule = {}, evidence = [], dropped = [], current = {};
+  // 수치 기준마다 개정 문장에 놓인 후보가 있는지 (있으면 기타 문장 후보는 쓰지 않음)
+  const amendAttrs = new Set();
+  const kindsOf = new Map();
+  if (useSent) candidates.forEach((c, i) => {
+    if (!c || !SENT_ATTRS.includes(c.attr) || !c.quote) return;
+    const v = c.attr === "사용승인" ? String(c.value) : Number(String(c.value).replace(/,/g, ""));
+    const k = candidateKinds({ attr: c.attr, value: v, quote: c.quote }, text, sents);
+    kindsOf.set(i, k);
+    if (k.has(KIND_AMEND)) amendAttrs.add(c.attr);
+  });
+  candidates.forEach((c0, i) => {
     // AI 가 낸 값의 형태를 맞춘다 (숫자 문자열 → 숫자, 용도 한 개 → 배열)
     const c = Object.assign({}, c0);
     if (NUM_ATTRS.includes(c.attr)) c.value = Number(String(c.value).replace(/,/g, ""));
@@ -180,6 +274,23 @@ function verify(candidates, summary) {
     else if (c.attr === "위임" && !new RegExp(DELEG_RE.source).test(quote)) why = DELEG_NO_PHRASE;
     else if (c.attr === "위임" && c.value.replace(/\s+/g, "").length > DELEG_VALUE_MAX) why = DELEG_LONG_VALUE;
     if (why) { dropped.push({ attr: c.attr, value: c.value, why }); return; }
+    // 문장 종류: 현행 문장 수치는 current 로, 통계·배경 문장 수치는 버림, 기타 문장은 개정 문장에 같은 기준이 없을 때만
+    if (useSent && kindsOf.has(i)) {
+      const k = kindsOf.get(i);
+      const ok = k.has(KIND_AMEND) || (k.has(KIND_OTHER) && !amendAttrs.has(c.attr));
+      if (!ok) {
+        const w = k.has(KIND_CURRENT) ? WHY_CURRENT : k.has(KIND_STAT) ? WHY_STAT : WHY_OTHER;
+        dropped.push({ attr: c.attr, value: c.value, why: w });
+        if (w === WHY_CURRENT) {
+          if (c.attr === "사용승인") current.사용승인 = current.사용승인 || { before: c.value };
+          else {
+            current[c.attr] = current[c.attr] || {};
+            if (current[c.attr][c.bound] === undefined) current[c.attr][c.bound] = c.value;
+          }
+        }
+        return;
+      }
+    }
     if (c.attr === "용도") {
       // 코드마다 따로 본다: 근거에 시설 이름이 있는 코드만 남기고 나머지는 버린다
       const kept = c.value.filter((v) => useTermIn(v, quote));
@@ -199,10 +310,10 @@ function verify(candidates, summary) {
     }
     evidence.push({ attr: c.attr, value: c.value, quote });
   });
-  return { rule, evidence, dropped };
+  return { rule, evidence, dropped, current };
 }
 
-function extract(summary) { return verify(extractCandidates(summary), summary); }
+function extract(summary, opts) { return verify(extractCandidates(summary), summary, opts); }
 
 /** 규칙 한 줄 설명 (crosscheck.json 의 ours 와 같은 표기: "100,000㎡ 이상", "2층 이하", "운수시설·공장") */
 function ruleTexts(rule) {
@@ -220,6 +331,9 @@ function ruleTexts(rule) {
   if (rule.위임 && rule.위임.length) out.위임 = rule.위임.join("·");
   return out;
 }
+
+/** 현행 기준 한 줄 설명 (current → {세대수: "300세대 이상, 300세대 이하"}). 판정에 쓰지 않는 참고 값 */
+function currentTexts(current) { return ruleTexts(current || {}); }
 
 // ---------------------------------------------------------------- 의안 원문에서 "개정 부분"만 고르기
 /*
@@ -332,9 +446,10 @@ function extractFromDoc(raw) {
     dropped0.push({ attr: c.attr, value: c.value, why: AMBIGUOUS });
     return false;
   });
-  const r = verify(kept, text);
+  const r = verify(kept, text, { sentences: false }); // 개정 부분 글은 이미 고친 뒤 글만
   return { text, rule: r.rule, evidence: r.evidence, dropped: dropped0.concat(r.dropped) };
 }
 
-module.exports = { NUM_ATTRS, NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
+module.exports = { KIND_AMEND, KIND_CURRENT, KIND_STAT, KIND_OTHER, WHY_CURRENT, WHY_STAT, WHY_OTHER, classifySentences, currentTexts,
+  NUM_ATTRS, NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
   prepDocText, amendedText, extractFromDoc };

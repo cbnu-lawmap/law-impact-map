@@ -11,6 +11,11 @@
  *   POST { action: "set", role: "담당자", name, bill, status, memo }               → { ok, row }
  *   POST { action: "set", role: "담당자", name, items: [{ bill, status, memo }] }   → { ok, saved, rows, failed: [{ bill, error }] }  (최대 50건)
  *   POST { action: "decide", role: "결재자", name, bill, decision: "승인"|"반려", reason } → { ok, row }
+ *   POST { action: "reset", confirm: "초기화" }   → { ok, reset: { progress, log, runs_reset } }
+ *        시연 전용: 진행 기록(review_progress)과 결재 기록(review_log)을 모두 지우고 agent_runs.human_edited 를 false 로
+ *        (DB 함수 progress_reset, supabase/migrations/004_demo_reset.sql). 역할·이름은 받지 않는다.
+ *        허용한 사이트만, 확인 문구가 정확히 "초기화" 여야 하고, IP당 1분 2회. 실제 도입 시에는 이 동작을 뺀다.
+ *        npm run demo:reset (server/scripts/demo-reset.js) 이나 행정 화면 admin.html#reset 에서 부른다.
  *
  * 막는 것: 허용한 사이트(CORS 목록)만, IP당 1분 30회, 이름 1~20자, 메모 300자, 반려 사유 100자,
  *          의안번호 7자리이고 bills.json 에 있어야 함, 이름·메모·사유에 전화번호·주민번호·이메일 모양이면 거절,
@@ -25,6 +30,8 @@ const DECISIONS = ["승인", "반려"];
 const MAX_ITEMS = 50;
 const CACHE_MS = 10 * 60000;
 const limited = createLimiter({ windowMs: 60000, max: 30 });
+const RESET_CONFIRM = "초기화";
+const resetLimited = createLimiter({ windowMs: 60000, max: 2 }); // 초기화는 더 적게
 
 let billCache = null;
 async function billNos() {
@@ -86,6 +93,14 @@ module.exports = async function handler(req, res) {
   const body = readBody(req);
   try {
     const action = str(body.action);
+    if (action === "reset") {
+      // 시연 전용 초기화. 역할·이름과 상관없이 확인 문구로만 받는다
+      if (resetLimited(clientIp(req))) throw new Bad("초기화 요청이 너무 잦습니다. 1분 뒤에 다시 해 주세요.", 429);
+      if (str(body.confirm) !== RESET_CONFIRM) throw new Bad("확인 문구가 맞지 않습니다 (confirm: \"" + RESET_CONFIRM + "\")");
+      const reset = await call("progress_reset", {});
+      res.status(200).json({ ok: true, reset: reset || {} });
+      return;
+    }
     const role = str(body.role);
     if (!ROLES.includes(role)) throw new Bad("역할은 담당자 또는 결재자입니다");
     const name = checkName(body.name);
@@ -128,11 +143,11 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    throw new Bad("action 은 set 또는 decide 입니다");
+    throw new Bad("action 은 set, decide, reset 중 하나입니다");
   } catch (e) {
     if (e instanceof Bad) { res.status(e.code).json({ error: e.message }); return; }
     res.status(502).json({ error: "저장하지 못했습니다" });
   }
 };
 
-module.exports._test = { clearCache: () => { billCache = null; }, STATUSES, MAX_ITEMS };
+module.exports._test = { clearCache: () => { billCache = null; }, STATUSES, MAX_ITEMS, RESET_CONFIRM };
