@@ -20,7 +20,7 @@ function ok(name, fn) { fn(); n++; console.log("  ok  " + name); }
 const raw = (no) => fs.readFileSync(path.join(DOCS, no + "_원문.txt"), "utf8");
 
 ok("2218807: 원문에서 층수가 나오지 않음 (예전에는 50층 이상)", () => {
-  assert.ok(extract(prepDocText(raw("2218807"))).rule.층수, "예전 방식(원문 전체)에서는 층수가 나왔어야 함");
+  assert.ok(extract(prepDocText(raw("2218807")), { sentences: false }).rule.층수, "예전 방식(원문 전체, 문장 나누기 없이)에서는 층수가 나왔어야 함");
   const r = extractFromDoc(raw("2218807"));
   assert.strictEqual(r.rule.층수, undefined, "층수: " + JSON.stringify(r.rule.층수));
   assert.ok(r.dropped.some((d) => d.attr === "층수"), "층수는 버린 후보로 남아야 함");
@@ -29,7 +29,7 @@ ok("2218807: 원문에서 층수가 나오지 않음 (예전에는 50층 이상)
 });
 
 ok("2217767: 원문에서 층수가 나오지 않음 (예전에는 대비표 현행 칸의 3층 이상)", () => {
-  assert.ok(extract(prepDocText(raw("2217767"))).rule.층수, "예전 방식(원문 전체)에서는 층수가 나왔어야 함");
+  assert.ok(extract(prepDocText(raw("2217767")), { sentences: false }).rule.층수, "예전 방식(원문 전체, 문장 나누기 없이)에서는 층수가 나왔어야 함");
   const r = extractFromDoc(raw("2217767"));
   assert.strictEqual(r.rule.층수, undefined, "층수: " + JSON.stringify(r.rule.층수));
   assert.ok(!/3층/.test(r.text), "개정 부분 글에 3층이 없어야 함");

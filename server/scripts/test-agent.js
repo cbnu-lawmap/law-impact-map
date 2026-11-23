@@ -97,7 +97,7 @@ test("판정 시범이 아닌 법안: 원문 대조 통과 기준으로 판정, 
 });
 
 test("근거 없는 기준은 버림 (문구가 원문에 없거나 수치가 문구에 없음)", async () => {
-  const s = "현행법은 연면적 300제곱미터 이상인 건축물에 적용함.";
+  const s = "연면적 300제곱미터 이상인 건축물에 적용하도록 함."; // "현행법은 …" 이면 현행 문장이라 current 로 감 (test/current-vs-amended.js)
   const v = Criteria.verify([
     { attr: "연면적", bound: "min", value: 300, quote: "연면적 300제곱미터 이상" },
     { attr: "연면적", bound: "max", value: 500, quote: "연면적 300제곱미터 이상" },

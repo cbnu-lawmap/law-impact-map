@@ -154,11 +154,14 @@ function evaluateSource(source, text, candidates) {
       return true;
     });
   }
-  const v = Criteria.verify(cands, text);
+  // bill_text 는 개정 부분 글만 실으므로 현행·개정 문장 나누기를 하지 않는다 (criteria.verify 의 sentences)
+  const sentOn = source !== "bill_text";
+  const v = Criteria.verify(cands, text, { sentences: sentOn });
   const dropped = pre.concat(v.dropped);
   const delegation = Criteria.findDelegation(text);
   const norm = Criteria.normText(text);
   const useCue = Criteria.extractCandidates(norm).some((c) => c.attr === "용도");
+
   const items = {};
   ATTRS.forEach((attr) => {
     const ev = v.evidence.find((e) => e.attr === attr);
@@ -166,6 +169,7 @@ function evaluateSource(source, text, candidates) {
       items[attr] = { status: ST_OK, value: v.rule[attr], quote: ev.quote, why: "원문 대조 통과 (근거 문구가 출처 글에 그대로 있고 수치·단위가 맞음)" };
       return;
     }
+    // 현행·통계 문장에만 나온 수치 기준은 "부족" (why 에 현행 기준 설명 문장) 으로 남아 다음 출처(개정 조문)를 찾게 된다
     const cued = attr === "용도" ? useCue : CUES[attr].test(norm);
     const tried = dropped.filter((d) => d.attr === attr);
     if (!cued && !tried.length) return; // 이 출처에서는 말하지 않은 기준
@@ -173,7 +177,7 @@ function evaluateSource(source, text, candidates) {
     if (d) { items[attr] = { status: ST_DELEG, value: null, quote: d.quote, why: d.by + "으로 정하는 " + d.value + " (위임 문구를 출처 글에서 확인)" }; return; }
     items[attr] = { status: ST_LOW, value: null, quote: null, why: tried.length ? tried.map((t) => t.why).join("; ") : "기준 낱말은 있지만 수치·단위가 있는 근거 문구 없음" };
   });
-  return { rule: v.rule, evidence: v.evidence, dropped, delegation, items };
+  return { rule: v.rule, evidence: v.evidence, dropped, delegation, items, current: v.current || {} };
 }
 
 /**
@@ -214,13 +218,24 @@ function mergeEvaluations(evals) {
   const deleg = [];
   evals.forEach((e) => { if (e.rule && e.rule.위임) e.rule.위임.forEach((x) => { if (!deleg.includes(x)) deleg.push(x); }); });
   if (deleg.length) rule.위임 = deleg;
+  // 현행 기준 (판정에 쓰지 않는 참고): 기준마다 처음 나온 출처의 값
+  const current = {};
+  evals.forEach((e) => Object.keys(e.current || {}).forEach((a) => { if (!current[a]) current[a] = { value: e.current[a], source: e.source }; }));
   const revived = list.filter((t) => t.revived_by).map((t) => ({ attr: t.attr, from: t.history[0].status, by: t.revived_by, by_ko: SOURCE_KO[t.revived_by] }));
-  return { criteria: list, extra, rule, revived, anchor };
+  return { criteria: list, extra, rule, revived, anchor, current };
 }
 
 /** 더 찾아야 하는지: 기준이 하나도 없거나 "부족" 인 기준이 있으면 */
 function needMore(merged) {
   return !merged.criteria.length || merged.criteria.some((c) => c.status === ST_LOW);
+}
+
+/** 현행 기준 → 개정 기준 한 줄 ("세대수 현행 300세대 이상 → 개정 30세대 이상"). 현행 기준이 없으면 "" */
+function currentLine(current, rule) {
+  const cur = {};
+  Object.keys(current || {}).forEach((a) => { cur[a] = current[a] && current[a].value !== undefined ? current[a].value : current[a]; });
+  const ct = Criteria.ruleTexts(cur), nt = Criteria.ruleTexts(rule || {});
+  return Object.keys(ct).map((a) => a + " 현행 " + ct[a] + " → " + (nt[a] ? "개정 " + nt[a] : "개정 기준 없음")).join(", ");
 }
 
 /** 평가 결과를 한 줄로 (단계 기록·모델에게 주는 짧은 글) */
@@ -231,5 +246,5 @@ function evalLine(merged) {
 
 module.exports = {
   SOURCES, SOURCE_KO, NONE, CANDIDATE_LABEL, ST_OK, ST_DELEG, ST_LOW, ST_CAND, NEXT_WHY, CURRENT_LAW, AMBIGUOUS,
-  createSimilarRules, searchSource, evaluateSource, mergeEvaluations, needMore, evalLine, dropAmbiguous,
+  createSimilarRules, searchSource, evaluateSource, mergeEvaluations, needMore, evalLine, currentLine, dropAmbiguous,
 };

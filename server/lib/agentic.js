@@ -115,6 +115,14 @@ function followNext(messages, no) {
   return { role: "assistant", content: "끝" };
 }
 
+// 근거 평가 단계 글 끝에 붙이는 현행 기준 (판정에 쓰지 않음)
+function curNote(ev) {
+  const cur = {};
+  Object.keys(ev.current || {}).forEach((a) => { cur[a] = { value: ev.current[a] }; });
+  const line = S.currentLine(cur, ev.rule);
+  return line ? " · 현행 기준은 판정에 쓰지 않음 (" + line + ")" : "";
+}
+
 /** 공통 상태 (두 방식이 같이 씀) */
 function makeCtx(o) {
   const { D, no, llm, limits } = o;
@@ -147,7 +155,7 @@ function makeCtx(o) {
       const x = await extractFor(source, r.text, opts.model !== false);
       how = x.how;
       ev = Object.assign(S.evaluateSource(source, r.text, x.cands), { source, found: true });
-      st.extraction.push({ source, method: how, candidates_n: x.cands.length, passed: ev.evidence.length, dropped: ev.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: ev.rule });
+      st.extraction.push({ source, method: how, candidates_n: x.cands.length, passed: ev.evidence.length, dropped: ev.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: ev.rule, current: ev.current });
     }
     if (source === "similar_rules" && r.found) st.candidates = r.candidates;
     st.evals.push(ev);
@@ -158,7 +166,7 @@ function makeCtx(o) {
     st.steps.push({ tool: "search_sources", tool_ko: TOOL_KO.search_sources + " (" + S.SOURCE_KO[source] + ")", source, why: String(why || "").slice(0, 160), summary: searchSummary, ok: !r.error, by_server: !!opts.byServer });
     const next = nextAction();
     const evalSummary = (source === "similar_rules" ? "후보 규칙은 판정에 넣지 않음 (" + S.CANDIDATE_LABEL + "). " : "") +
-      "평가 결과: " + S.evalLine(st.merged) + " → " + next.line;
+      "평가 결과: " + S.evalLine(st.merged) + " → " + next.line + curNote(ev);
     st.steps.push({ tool: "evaluate_evidence", tool_ko: TOOL_KO.evaluate_evidence, source, why: "자동 평가 (모델이 아니라 코드 규칙으로: 원문 대조, 수치·단위, 개정문 여부)", summary: evalSummary, ok: true, auto: true,
       evaluation: Object.keys(ev.items).map((a) => ({ attr: a, status: ev.items[a].status, why: ev.items[a].why })), next: next.model });
     return { r, ev, next };
@@ -271,7 +279,7 @@ function makeCtx(o) {
       draft: st.draft,
       rule: st.judged ? st.judged.rule : m.rule,
       evidence: m.criteria.filter((c) => c.status === S.ST_OK).map((c) => ({ attr: c.attr, value: c.value, quote: c.quote, source: c.source })),
-      extraction: { rule: m.rule, by_source: st.extraction, method: st.extraction.map((x) => x.source + " " + x.method).join(", ") },
+      extraction: { rule: m.rule, current: m.current, current_line: S.currentLine(m.current, m.rule) || null, by_source: st.extraction, method: st.extraction.map((x) => x.source + " " + x.method).join(", ") },
       evaluation: m.criteria,
       extra_criteria: m.extra,
       revived: m.revived,
@@ -317,7 +325,7 @@ async function runRag1(o) {
       } catch (e) { /* 정규식 */ }
     }
     ev = Object.assign(S.evaluateSource("summary", r.text, cands), { source: "summary", found: true });
-    st.extraction.push({ source: "summary", method: how, candidates_n: cands.length, passed: ev.evidence.length, dropped: ev.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: ev.rule });
+    st.extraction.push({ source: "summary", method: how, candidates_n: cands.length, passed: ev.evidence.length, dropped: ev.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: ev.rule, current: ev.current });
     st.steps.push({ tool: "extract_criteria", tool_ko: TOOL_KO.extract_criteria, why: "모델 호출 한 번으로 기준 후보를 뽑습니다.", summary: how + " 추출 후보 " + cands.length + "개, 원문 대조 통과 " + ev.evidence.length + "개", ok: true });
   }
   st.evals.push(ev);
@@ -325,7 +333,7 @@ async function runRag1(o) {
   st.plan = c.planFor();
   st.stopWhy = "1회 RAG 라 다시 찾지 않음";
   st.steps.push({ tool: "evaluate_evidence", tool_ko: TOOL_KO.evaluate_evidence, source: "summary", why: "자동 평가 (모델이 아니라 코드 규칙으로)", ok: true, auto: true,
-    summary: "평가 결과: " + S.evalLine(st.merged) + " → " + st.stopWhy + ". " + (st.plan.use_rule ? st.plan.source + "으로 건물 판정" : st.plan.hold),
+    summary: "평가 결과: " + S.evalLine(st.merged) + " → " + st.stopWhy + ". " + (st.plan.use_rule ? st.plan.source + "으로 건물 판정" : st.plan.hold) + curNote(ev),
     evaluation: Object.keys(ev.items).map((a) => ({ attr: a, status: ev.items[a].status, why: ev.items[a].why })) });
   if (st.plan.use_rule) c.judgeTool(st.plan.use_rule, false, "평가를 통과한 규칙(없으면 시범 규칙)으로 집계합니다.");
   await c.draftTool(false, false, "정해진 틀 문장으로 초안을 씁니다 (모델 호출 없음).");
