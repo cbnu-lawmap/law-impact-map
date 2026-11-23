@@ -11,6 +11,7 @@
   최근 몇 주는 회부가 덜 끝나 실제보다 적게 나올 수 있다 (committee_empty 열로 빈 칸 수를 함께 남긴다).
 - 범위(scope): filter_bills.py·collect_history.py 와 같은 위원회 + 법안 이름 낱말 규칙 (처리 결과는 따지지 않음).
 - 22대 범위 법안은 data/bills_field_pred.csv 의 FIELD_PRED(1~9)로 분야별 건수도 센다 (예측 파일에 없는 법안은 field_na).
+- collected_on 열: 수집한 날 (한국 시간). 이 날이 들어 있는 주는 아직 끝나지 않은 주라 노트북에서 뺀다.
 - 키(ASSEMBLY_API_KEY)가 없으면 조용히 건너뛴다. 결과: data/bill_volume_weekly.csv
 """
 import csv
@@ -96,6 +97,7 @@ def main():
         print("ASSEMBLY_API_KEY 없음: 수집을 건너뜀")
         return
     fields = load_fields()
+    today = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=9)).date().isoformat()
     cols = ["total", "committee_empty", MOLIT, "scope", "scope_molit"] + [f"field_{k}" for k in FIELDS] + ["field_na"]
     out = []
     for age in AGES:
@@ -128,9 +130,12 @@ def main():
         if not cnt:
             continue
         # 빈 주(발의 0건)도 0으로 채워 주가 빠지지 않게 한다
+        # 22대는 수집한 날이 든 주까지 이어 붙인다 (그 주에 아직 발의가 없어도 끝을 알 수 있게)
         w, last = min(cnt), max(cnt)
+        if age == max(AGES):
+            last = max(last, week_start(today))
         while w <= last:
-            out.append({"week_start": w.isoformat(), "age": age, **{k: cnt[w][k] for k in cols}})
+            out.append({"week_start": w.isoformat(), "age": age, "collected_on": today, **{k: cnt[w][k] for k in cols}})
             w += dt.timedelta(days=7)
 
     if not out:
@@ -138,7 +143,7 @@ def main():
         return
     path = DATA / "bill_volume_weekly.csv"
     with open(path, "w", newline="", encoding="utf-8-sig") as f:
-        wr = csv.DictWriter(f, fieldnames=["week_start", "age"] + cols)
+        wr = csv.DictWriter(f, fieldnames=["week_start", "age", "collected_on"] + cols)
         wr.writeheader()
         wr.writerows(out)
     print(f"저장 완료: {path.relative_to(ROOT)} ({len(out)}주)")
