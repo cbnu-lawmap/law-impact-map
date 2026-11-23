@@ -1,8 +1,11 @@
 name: Daily bill collection
 
-# 매일 한 번 열린국회 API에서 법안을 받아 분야를 붙이고 web/data/bills.json 을 갱신한다.
+# 매일 한 번 열린국회 API에서 법안을 받아 분야를 붙이고 web/data/bills.json 과 web/data/summaries.json 을 갱신한다.
+#   제안이유 전문: collect_summaries.py 가 data/bills_summary.csv 에 전문이 없는 법안만 BPMBILLSUMMARY 로 받고
+#   (이미 받은 법안은 다시 받지 않음), build_web_data.py 가 그 csv 로 summaries.json(전문)과 bills.json(300자 요약)을 만든다.
 # 바뀐 것이 있으면 main 에 커밋하고 같은 실행 안에서 Pages 배포(pages.yml)를 부른다.
-# (GITHUB_TOKEN 으로 올린 커밋은 다른 워크플로를 깨우지 않으므로 push 트리거에 맡기지 않는다)
+# (GITHUB_TOKEN 으로 올린 커밋은 다른 워크플로를 깨우지 않으므로 push 트리거에 맡기지 않는다.
+#  임베딩 갱신 embed-bills.yml 은 이 워크플로가 끝나면 workflow_run 으로 돈다)
 
 on:
   schedule:
@@ -69,7 +72,7 @@ jobs:
         run: |
           # 저장소는 LF 로 저장한다. csv 모듈이 쓰는 CRLF 줄끝을 커밋할 때 LF 로 바꿔 불필요한 전체 변경을 막는다
           git config core.autocrlf input
-          git add data/bills_summary.csv data/bills_stage.csv data/bills_field_pred.csv data/bills_seen.csv web/data/bills.json
+          git add data/bills_summary.csv data/bills_stage.csv data/bills_field_pred.csv data/bills_seen.csv web/data/bills.json web/data/summaries.json
           if git diff --cached --quiet; then
             echo "No changes"
             echo "changed=false" >> "$GITHUB_OUTPUT"
