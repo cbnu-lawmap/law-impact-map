@@ -7,39 +7,31 @@
 
 ## 무엇을 저장하나
 
-| 표 | 내용 | 누가 읽나 | 누가 쓰나 |
-| :--- | :--- | :--- | :--- |
-| `members` | 로그인 이메일과 역할(담당자 / 결재자) | 본인 줄만 | 관리자가 SQL 로 직접 |
-| `review_progress` | 법안별 진행 상태, 인계 메모(300자), 마지막 수정자·시각, 결재 여부 | 구성원 | 담당자(저장), 결재자는 `approve_review()` 함수로 결재만 |
-| `review_log` | 등록·수정·결재 기록 (트리거가 씀) | 구성원 | 트리거·결재 함수만 |
-| `bill_embeddings` | 공개 법안 요약문의 임베딩(384차원) | 누구나 | 서비스 키(GitHub Actions)만 |
-| `agent_runs` | 검토 에이전트 실행 기록(법안 번호, 단계 수, 토큰 수, 사람 수정 여부) | 구성원, 화면에는 `agent_run_stats()` 집계만 | 서비스 키(Vercel)만 |
+> 시연용: 로그인 없이 역할을 고르는 방식. 실제 도입 시 기관 통합로그인(SSO)·공무원 인증서(GPKI)와 연동
 
-수정자·시각은 화면이 보내는 값이 아니라 DB 트리거(`rp_stamp`)가 로그인 정보로 채웁니다. 담당자가 저장하면 결재가 풀려 다시 결재를 받아야 합니다.
+| 표 | 내용 | 누가 읽나 (브라우저, 공개 키) | 누가 쓰나 |
+| :--- | :--- | :--- | :--- |
+| `review_progress` | 법안별 진행 상태, 인계 메모(300자), 마지막 수정자(표시 이름)·시각, 승인/반려·결재자·반려 사유(100자) | 누구나 (읽기만) | 서버 `/api/progress` 가 서비스 키로 `progress_set()` · `progress_decide()` 만 |
+| `review_log` | 등록·수정·승인·반려 기록 (누가 = "이름 (역할)") | 누구나 (읽기만) | 위 두 함수 안에서만 |
+| `bill_embeddings` | 공개 법안 요약문의 임베딩(384차원) | 누구나 | 서비스 키(GitHub Actions)만 |
+| `agent_runs` | 검토 에이전트 실행 기록(법안 번호, 단계 수, 토큰 수, 사람 수정 여부) | 직접은 못 읽음, `agent_run_stats()` 집계만 | 서비스 키(Vercel)만 |
+
+수정 시각은 DB 트리거(`rp_stamp`)가 채웁니다. 담당자가 상태나 메모를 바꾸면 승인·반려가 풀려 다시 결재를 받아야 합니다.
+진행 상태 값은 `todo`(미검토) · `doing`(검토 중) · `hold`(보류) · `done`(검토 완료) 네 가지이고, 결재자는 `done` 이면서 아직 결재하지 않은 법안만 승인·반려합니다.
 
 ## 처음 설정 (한 번)
 
 1. **SQL 실행**: Supabase 대시보드 > SQL Editor 에서 차례로 실행합니다.
    - `supabase/schema.sql` (적용됨)
-   - `supabase/migrations/002_approve_guard_and_text_hash.sql`
-     - 담당자가 `approved` 열을 직접 바꿔 스스로 결재할 수 있던 구멍을 막고, 이미 결재된 법안을 다시 결재하면 결재가 풀리던 문제를 고칩니다.
-     - `bill_embeddings.text_hash` 열을 더해 요약문이 바뀐 법안만 임베딩을 다시 만듭니다 (열이 없어도 스크립트는 "없는 법안만" 넣습니다).
-2. **이메일 로그인**: Authentication > Providers > Email 을 켭니다 (Magic Link).
-   Authentication > URL Configuration 에서
-   - Site URL: `https://cbnu-lawmap.github.io/law-impact-map/`
-   - Redirect URLs: `https://cbnu-lawmap.github.io/law-impact-map/admin.html`, 로컬 시험용 `http://localhost:8000/admin.html`
-3. **Realtime**: `schema.sql` 이 `review_progress` 를 `supabase_realtime` 발행에 넣습니다. Database > Publications 에서 켜져 있는지 확인합니다.
-4. **구성원 등록**: SQL Editor 에서 넣습니다. 이메일은 **소문자**로 넣습니다 (로그인 이메일을 소문자로 바꿔 비교함).
-
-   ```sql
-   insert into public.members(email, role) values ('담당자메일@example.go.kr', '담당자');
-   insert into public.members(email, role) values ('결재자메일@example.go.kr', '결재자');
-   -- 역할 바꾸기 / 빼기
-   update public.members set role = '결재자' where email = '...';
-   delete from public.members where email = '...';
-   ```
-
-   등록되지 않은 사람도 이메일 링크로 로그인은 되지만, 화면에 "구성원으로 등록되지 않은 계정"이라고 나오고 아무 표도 읽거나 쓸 수 없습니다 (RLS).
+   - `supabase/migrations/002_approve_guard_and_text_hash.sql` (적용됨)
+   - `supabase/migrations/003_no_login.sql`
+     - 브라우저(anon / authenticated)는 `review_progress` · `review_log` 를 **읽기만** 합니다. 모든 표에서 insert / update / delete 권한을 거둡니다.
+     - 쓰기 함수 `progress_set(p_bill_no, p_status, p_memo, p_actor)`, `progress_decide(p_bill_no, p_decision, p_reason, p_actor)` 를 만들고 실행 권한은 `service_role` 에만 줍니다. 저장과 `review_log` 기록이 한 함수 안에서 함께 일어납니다.
+     - 이메일 로그인용 `members` 표, `my_role()`, `approve_review()` 를 지웁니다. `members` 에는 로그인 이메일(개인정보)만 있었고 이제 쓰지 않으므로 남기지 않습니다.
+     - 예전 기록에 남은 이메일(수정자·결재자·기록의 누가)은 아이디 앞 두 글자 + `***` 로 가립니다. 이제 누구나 읽는 표이기 때문입니다.
+     - 여러 번 실행해도 됩니다. 실시간 발행은 그대로 둡니다.
+2. **Realtime**: `review_progress` 가 `supabase_realtime` 발행에 들어 있는지 Database > Publications 에서 확인합니다.
+3. **이메일 로그인은 쓰지 않습니다.** Authentication > Providers > Email 은 꺼도 됩니다.
 
 ## 키 넣기
 
@@ -51,7 +43,7 @@
 | GitHub > Settings > Secrets > Actions | `SUPABASE_SERVICE_ROLE_KEY` | 서비스 키 (service_role 또는 secret) | `embed-bills.yml` 이 임베딩을 넣을 때 |
 | GitHub > Settings > Secrets > Actions | `SUPABASE_URL` (선택) | 프로젝트 주소 | 없으면 위 주소를 씀 |
 | Vercel > ppaegok-api > Settings > Environment Variables | `SUPABASE_URL` | 프로젝트 주소 | `/api/similar`, 에이전트 실행 기록 |
-| Vercel > ppaegok-api > Settings > Environment Variables | `SUPABASE_SERVICE_ROLE_KEY` | 서비스 키 | `server/lib/similar.js`, `server/lib/runs.js` |
+| Vercel > ppaegok-api > Settings > Environment Variables | `SUPABASE_SERVICE_ROLE_KEY` | 서비스 키 | `server/lib/similar.js`, `server/lib/runs.js`, `server/api/progress.js`(진행 저장·결재) |
 
 - 키를 넣은 뒤 Pages 는 **다시 배포**해야 화면에 반영됩니다 (Actions > Deploy web prototype to GitHub Pages > Run workflow).
 - Vercel 은 환경변수를 바꾼 뒤 Redeploy 해야 반영됩니다.
@@ -59,24 +51,36 @@
 
 ## 화면에서
 
-- 행정 화면 > 진행 현황 맨 위에 로그인 상자가 생깁니다. 이메일을 넣고 "로그인 링크 받기"를 누른 뒤, **같은 브라우저**에서 메일의 링크를 엽니다.
-- 담당자: 진행 상태·메모를 저장하면 구성원 모두에게 바로 보입니다. 처음 로그인하면 "이 브라우저 기록 가져오기"로 예전 기록을 올릴 수 있습니다.
-- 결재자: 읽기 전용입니다. 법안 상세와 "결재 대기 목록"에서 결재 버튼을 누릅니다.
-- 다른 사람의 이메일은 화면에 아이디 앞 두 글자만 보입니다 (예: `ab***`). 본인 이메일만 머리글에 그대로 보입니다.
-- 연결이 안 되거나 로그인 전이면 예전처럼 이 브라우저에만 저장하고, 진행 현황에 그렇다고 짧게 표시합니다.
-- 상황판의 "검토 에이전트 초안" 카드는 `agent_run_stats()` 집계만 읽습니다 (로그인 불필요). 기록이 없으면 "기록 없음", 불러오지 못하면 카드를 그리지 않습니다.
+- 화면 맨 위(키가 있을 때만)에 "시연용: 로그인 없이 역할을 고르는 방식. 실제 도입 시 기관 통합로그인(SSO)·공무원 인증서(GPKI)와 연동" 안내와 **역할(담당자 / 결재자)** 고르기, **이름**(20자) 칸이 있습니다. 둘 다 이 브라우저(localStorage)에만 남습니다. 이름 칸에는 화면에 보일 이름만 적고 연락처·이메일 같은 개인정보는 넣지 않습니다 (전화번호·주민번호·이메일 모양은 화면과 서버가 모두 거절).
+- 역할·이름을 정하기 전에는 함께 보는 기록을 **보기만** 합니다.
+- 담당자: 진행 상태·메모를 저장하면 모두에게 바로 보입니다. "이 브라우저 기록 가져오기"로 예전 기록을 50건씩 나눠 올립니다 (클라우드 쪽이 더 최근이면 그대로 둠).
+- 결재자: 진행 상태·메모는 바꿀 수 없습니다. 진행 현황의 "승인 대기 목록"(검토 완료 · 결재 전)과 법안 상세에서 승인하거나, 짧은 사유(100자, 선택)와 함께 반려합니다.
+- 법안 상세와 진행 현황 표에 "마지막 수정: 누가 · 언제"와 승인/반려가 보입니다.
+- Supabase 나 저장 서버(`/api/progress`)에 닿지 않으면 예전처럼 이 브라우저에만 저장하고, 진행 현황에 그렇다고 짧게 표시합니다. 키가 없으면 외부로 아무 요청도 보내지 않습니다.
+- 상황판의 "검토 에이전트 초안" 카드는 `agent_run_stats()` 집계만 읽습니다. 기록이 없으면 "기록 없음", 불러오지 못하면 카드를 그리지 않습니다.
+
+## 저장 서버 `/api/progress` (server/api/progress.js)
+
+```text
+GET  → { ok }  서버에 서비스 키가 있으면 true
+POST { action: "set", role: "담당자", name, bill, status, memo }                 → { ok, row }
+POST { action: "set", role: "담당자", name, items: [{ bill, status, memo }] }     → { ok, saved, rows, failed }  (최대 50건)
+POST { action: "decide", role: "결재자", name, bill, decision: "승인" | "반려", reason } → { ok, row }
+```
+
+서버가 확인하는 것: 허용한 사이트(`server/lib/common.js` 의 CORS 목록, 아니면 403), IP당 1분 30회(넘으면 429), 이름 1~20자, 메모 300자, 반려 사유 100자, 의안번호 7자리이고 `bills.json` 에 있음, 이름·메모·사유에 전화번호·주민번호·이메일 모양이면 거절, 담당자는 상태·메모만(`set`), 결재자는 승인·반려만(`decide`). DB 함수도 같은 길이·값·순서(검토 완료된 법안만, 한 번만 결재)를 다시 확인합니다.
 
 ## 보안 정리
 
-- **모든 표에 RLS** 를 켰습니다. 공개 키로 할 수 있는 일은 정책과 `security definer` 함수가 허락한 것뿐입니다.
+- **모든 표에 RLS** 를 켰습니다. 브라우저(공개 키)는 `review_progress` · `review_log` 를 **읽기만** 하고, 어느 표에도 쓰지 못합니다 (정책도 권한도 없음).
+- **쓰기는 서버만** 합니다. `/api/progress` 가 위 확인을 마친 뒤 서비스 키(`service_role`)로 `progress_set()` · `progress_decide()` 를 부릅니다. 두 함수는 `security definer` 이고 실행 권한은 `service_role` 에만 있습니다.
 - 브라우저에는 **공개(anon/publishable) 키만** 들어갑니다. 서비스 키는 Vercel 환경변수와 GitHub Actions secrets 에만 둡니다.
-- 역할은 `members` 표로만 정합니다. 화면의 "역할 고르기"(첫 화면 안내)는 권한과 무관합니다.
-- 결재는 `approve_review()` 함수로만 됩니다 (마이그레이션 002 이후 담당자가 결재 열을 직접 바꿔도 트리거가 되돌림).
-- 메모에는 개인정보를 넣지 않도록 화면이 전화번호·주민번호·이메일 모양을 막습니다 (DB 에는 300자 제한만 있음).
+- **스스로 고른 역할은 시연용**입니다. 누구나 담당자나 결재자를 고를 수 있으므로 권한 증명이 아닙니다. 실제 도입 시 기관 통합로그인(SSO)·공무원 인증서(GPKI)로 신원과 역할을 확인하고, 서버가 그 정보로 역할을 정해야 합니다.
+- 공개 시연 데이터(의안번호, 진행 상태, 메모, 표시 이름, 시각)만 저장합니다. 이메일은 받지 않습니다.
 - 화면은 supabase-js 를 고정 버전(2.45.4)과 무결성 해시(SRI)로 받습니다. 키가 없으면 받지도 않습니다.
 
 ## 기관 내부 DB 로 바꿀 때
 
-- 같은 `schema.sql` 을 내부 PostgreSQL(+ pgvector) 에 적용하고, 로그인은 기관 SSO 로 바꿉니다 (`auth.jwt() ->> 'email'` 을 쓰는 곳만 고치면 됨).
+- 같은 `schema.sql` 과 마이그레이션을 내부 PostgreSQL(+ pgvector) 에 적용하고, 로그인은 기관 통합로그인(SSO)·공무원 인증서(GPKI)로 붙입니다. 서버(`/api/progress`)가 화면이 보낸 역할·이름 대신 로그인 정보로 역할과 이름을 정하면 됩니다.
 - 화면은 `web/cloud.js` 한 파일만 바꾸면 됩니다 (`admin.js` 와는 `Cloud.*` 연결부로만 이어짐).
 - 서버는 `server/lib/supabase.js` 의 주소·헤더만 바꾸면 됩니다 (PostgREST 형식).
