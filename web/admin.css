@@ -246,6 +246,11 @@ table.dt { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
 .tag.wait { color: var(--muted); background: var(--bg); }
 .tag.check { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); font-weight: 600; }
 .tag .sub { color: var(--muted); }
+/* 통과 가능성 3단계 (신경망 추정). 색은 약하게: 법안의 좋고 나쁨이 아니라 추정 구간 */
+.pass-tier { white-space: nowrap; }
+.pass-tier.pass-hi { color: var(--accent-ink); font-weight: 600; }
+.pass-tier.pass-mid { color: var(--ink-2); }
+.pass-tier.pass-lo { color: var(--muted); }
 /* 심사 단계: 법사위 이후 진행 중은 강조, 종결(폐기 등)은 점선으로 흐리게 */
 .tag.stage { background: var(--bg); }
 .tag.stage.near { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); font-weight: 600; }

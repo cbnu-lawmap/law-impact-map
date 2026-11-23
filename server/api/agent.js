@@ -41,7 +41,7 @@ const TOOL_KO = {
   crosscheck: "출처별 기준 비교",
   judge_buildings: "건물 판정 집계",
   draft_review: "검토 초안 쓰기",
-  classify_field: "분야 분류 (직접 학습한 신경망)",
+  classify_field: "분야 분류 (직접 학습한 모델)",
   predict_pass: "통과 가능성 (직접 학습한 신경망)",
 };
 
@@ -173,7 +173,7 @@ function mockLLM() {
     crosscheck: "뽑은 기준이 다른 출처와 같은지 봅니다.",
     judge_buildings: "원문 대조를 통과한 기준으로 사창동 건물을 집계합니다.",
     draft_review: "모은 결과로 검토 초안을 씁니다.",
-    classify_field: "직접 학습한 분야 분류 신경망으로 분야를 확인합니다.",
+    classify_field: "직접 학습한 분야 분류 모델로 분야를 확인합니다.",
     predict_pass: "직접 학습한 통과 가능성 신경망 결과를 봅니다.",
   };
   let n = 0;
@@ -305,8 +305,10 @@ async function run(D, no, note, llm) {
       if (demo) lines.push("시범 규칙(" + demo.method + "): " + Object.entries(Criteria.ruleTexts(demo.rule)).map((x) => x.join(" ")).join(", ") + " | 근거 " + demo.source_text);
     }
     if (state.cross) lines.push("출처별 비교: " + state.cross.summary);
-    if (state.field) lines.push("분야(직접 학습 신경망 추정): " + state.field.top.map((t) => t.name + " " + Math.round(t.p * 100) + "%").join(", "));
-    if (state.pass) lines.push("통과 가능성(직접 학습 신경망 추정): " + Math.round(state.pass.p * 100) + "%" +
+    if (state.field) lines.push("분야(직접 학습 " + modelKo(state.field.metrics) + " 추정" + (state.field.needs_check ? ", 분류 확인 필요" : "") + "): " + state.field.top.map((t) => t.name + " " + Math.round(t.p * 100) + "%").join(", "));
+    if (state.pass) lines.push("통과 가능성(직접 학습 신경망 추정): " +
+      (state.pass.tier ? state.pass.tier.name + " (같은 구간 21대 실제 반영률 " + Math.round(state.pass.tier.actual_rate * 100) + "%, 확률 " + Math.round(state.pass.p * 100) + "%)"
+        : Math.round(state.pass.p * 100) + "%") +
       (state.pass.metrics.test_auc != null ? " (모델 시험 AUC " + state.pass.metrics.test_auc + ")" : ""));
     if (state.judged) {
       const c = state.judged.counts;
@@ -441,6 +443,11 @@ async function run(D, no, note, llm) {
   }
 
   // 제안이유 머리말·공백 정리 (notebooks/field_classifier.ipynb 의 clean 과 같게)
+  // 분야 분류 모델 이름 (노트북이 검증 성적이 높은 쪽을 골라 metrics.model 에 적는다)
+  function modelKo(m) {
+    return m && m.model === "logreg" ? "로지스틱 회귀" : m && m.model === "nn" ? "신경망" : "모델";
+  }
+
   function cleanSummary(t) {
     return String(t || "").replace(/^\s*제안이유\s*(및\s*주요내용)?/, "").replace(/\s+/g, " ").trim();
   }
@@ -451,9 +458,12 @@ async function run(D, no, note, llm) {
     const prob = M.predict(cleanSummary(fullText));
     const top = prob.map((p, i) => ({ field: M.labels[i], p })).sort((a, b) => b.p - a.p).slice(0, 3)
       .map((x) => ({ field: x.field, name: (D.fields && D.fields[x.field]) || x.field, p: Math.round(x.p * 1000) / 1000 }));
-    state.field = { top, metrics: M.metrics, current: bill.field != null ? String(bill.field) : null };
+    // 1위 확률이 노트북 9-2절 기준값(review_threshold) 미만이면 "분류 확인 필요"
+    const review = typeof M.metrics.review_threshold === "number" ? M.metrics.review_threshold : 0.6;
+    const needsCheck = top[0].p < review;
+    state.field = { top, metrics: M.metrics, needs_check: needsCheck, current: bill.field != null ? String(bill.field) : null };
     return { top, current_field: state.field.current, current_name: bill.field != null && D.fields ? D.fields[bill.field] : null,
-      same_as_current: state.field.current === top[0].field, model: M.metrics };
+      same_as_current: state.field.current === top[0].field, needs_check: needsCheck, review_threshold: review, model: M.metrics };
   }
 
   function predictPass() {
@@ -461,9 +471,15 @@ async function run(D, no, note, llm) {
     if (!pm) return { error: "통과 가능성 모델 결과가 아직 없습니다 (models/pass_prediction.json)" };
     const p = bill.pass_prob;
     if (p === undefined || p === null) return { error: "이 법안은 모델 예측이 없습니다 (학습 뒤에 들어온 새 법안이면 다음 학습 때 반영)" };
-    state.pass = { p, metrics: pm.metrics || {} };
-    return { pass_prob: p, label: p >= (pm.threshold || 0.5) ? "통과 가능성 높음" : "통과 가능성 낮음", threshold: pm.threshold || 0.5, model: pm.metrics || {},
-      note: "21대 국회 처리 결과로 학습한 추정. 법안의 좋고 나쁨과 무관" };
+    // 3단계 구간 (notebooks/pass_prediction.ipynb 10-3절, 시간 분리 시험에서 정한 경계와 구간별 실제 반영 비율)
+    const tiers = Array.isArray(pm.tiers) ? pm.tiers : [];
+    const t = tiers.length ? (tiers.find((x) => p < x.max) || tiers[tiers.length - 1]) : null;
+    const tier = t ? { name: t.name, actual_rate: t.actual_rate, n: t.n, min: t.min, max: t.max } : null;
+    state.pass = { p, tier, metrics: pm.metrics || {} };
+    return { pass_prob: p, tier: tier ? tier.name : null, tier_actual_rate: tier ? tier.actual_rate : null,
+      label: tier ? "통과 가능성 " + tier.name : p >= (pm.threshold || 0.5) ? "통과 가능성 높음" : "통과 가능성 낮음",
+      threshold: pm.threshold || 0.5, model: pm.metrics || {},
+      note: "21대 국회 처리 결과로 학습한 신경망 추정. 제안한 날 알 수 있는 정보만 사용. 구간의 실제 반영률은 21대 나중에 낸 법안(시간 분리 시험)에서 잰 값. 법안의 좋고 나쁨과 무관" };
   }
 
   async function exec(name, args) {
@@ -527,9 +543,14 @@ async function run(D, no, note, llm) {
       const t = r.top[0];
       return `${t.name} ${Math.round(t.p * 100)}%` + (r.top[1] ? `, 다음 ${r.top[1].name} ${Math.round(r.top[1].p * 100)}%` : "") +
         (r.current_name ? (r.same_as_current ? " (목록 분야와 같음)" : ` (목록 분야 ${r.current_name}와 다름)`) : "") +
-        (r.model && r.model.test_acc != null ? ` · 모델 시험 정확도 ${Math.round(r.model.test_acc * 100)}%` : "");
+        (r.needs_check ? ` · 분류 확인 필요 (확신도 ${r.review_threshold} 미만)` : "") +
+        ` · ${modelKo(r.model)}` + (r.model && r.model.test_acc != null ? ` 모델 시험 정확도 ${Math.round(r.model.test_acc * 100)}%` : "");
     }
-    if (name === "predict_pass") return `${r.label} (${Math.round(r.pass_prob * 100)}%, 모델 추정)` + (r.model && r.model.test_auc != null ? ` · 모델 시험 AUC ${r.model.test_auc}` : "");
+    if (name === "predict_pass") {
+      return (r.tier ? `${r.label} (같은 구간 21대 실제 반영률 ${Math.round(r.tier_actual_rate * 100)}%, 신경망 추정 ${Math.round(r.pass_prob * 100)}%, 모델 추정)`
+        : `${r.label} (${Math.round(r.pass_prob * 100)}%, 모델 추정)`) +
+        " · 제안한 날 알 수 있는 정보만 사용" + (r.model && r.model.test_auc != null ? ` · 모델 시험 AUC ${r.model.test_auc}` : "");
+    }
     if (name === "draft_review") return "검토 초안 " + r.draft.length + "자" + (r.template ? " (정해진 틀로 작성)" : "") + (r.unverified.length ? ", 근거에 없는 숫자 " + r.unverified.length + "개" : "");
     return "";
   }

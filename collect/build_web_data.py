@@ -50,6 +50,25 @@ def round_coords(c):
     return [round_coords(x) for x in c]
 
 
+REVIEW_DEFAULT = 0.6   # 모델 파일에 review_threshold 가 없을 때 (이전 고정값)
+
+
+def read_model(name):
+    path = os.path.join(OUT, "models", name)
+    if not os.path.exists(path):
+        return {}
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def pass_tier(p, tiers):
+    """통과 가능성 구간 이름: 각 구간은 [min, max) 이고 마지막 구간은 max 를 포함 (web/admin.js passTier 와 같게)"""
+    for t in tiers:
+        if p < t["max"]:
+            return t["name"]
+    return tiers[-1]["name"]
+
+
 def dump(obj, name):
     path = os.path.join(OUT, name)
     with open(path, "w", encoding="utf-8") as f:
@@ -587,7 +606,21 @@ def main():
     mark_added(bills)
     print("  심사 단계:", dict(Counter(b["stage"] for b in bills)))
     print("  통과 가능성 예측:", sum("pass_prob" in b for b in bills), "건")
-    dump({"fields": FIELD_NAMES, "bills": bills}, "bills.json")
+    # 노트북이 내보낸 모델 파일에서 화면이 쓸 기준만 옮긴다 (가중치 파일은 커서 화면이 직접 읽지 않음)
+    #   review_threshold: 분야 자동 분류 확신도가 이 값 미만이면 "분류 확인 필요" (field_classifier.ipynb 9-2절)
+    #   pass_tiers: 통과 가능성 3단계 경계와 구간별 실제 반영 비율 (pass_prediction.ipynb 10-3절)
+    fm = read_model("field_classifier.json")
+    pm = read_model("pass_prediction.json")
+    review = float(fm.get("review_threshold", REVIEW_DEFAULT))
+    field_model = {k: fm.get("metrics", {}).get(k) for k in ("model", "model_name", "cv_mean", "cv_mean_logreg", "cv_mean_nn")}
+    tiers = pm.get("tiers") or []
+    n_review = sum(1 for b in bills if b["conf"] is not None and b["conf"] < review)
+    print(f"  분류 확인 필요 (확신도 {review} 미만): {n_review}건 / 분야 모델 {field_model.get('model')}")
+    if tiers:
+        cnt = Counter(pass_tier(b["pass_prob"], tiers) for b in bills if "pass_prob" in b)
+        print("  통과 가능성 3단계:", ", ".join(f"{t['name']} {cnt.get(t['name'], 0)}건" for t in tiers))
+    dump({"fields": FIELD_NAMES, "review_threshold": review, "field_model": field_model,
+          "pass_tiers": tiers, "bills": bills}, "bills.json")
     dump({"note": "제안이유 전문 (머리말 제거, 공백 정리). 검토 에이전트가 기준을 뽑을 때 쓴다", "summaries": full}, "summaries.json")
 
     # 4) 판정 시범
