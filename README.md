@@ -34,7 +34,7 @@
 | 법안 수집 | 열린국회정보 Open API로 건축·주거·안전 분야 계류 법안 수집 |
 | 분야 분류 | 법안 제안이유를 9개 분야로 분류하는 신경망 (직접 학습) |
 | 통과 예측 | 21대 국회 처리 결과로 학습한 신경망이 계류 법안의 반영 가능성 추정 |
-| 건물 층수 추정 | 건축물대장이 없는 건물의 지상층수를 모양·이웃으로 추정하는 신경망 (참고용) |
+| 건물 빈칸 추정 | 판정불가의 원인인 빈 연면적·사용승인일·지상층수를 모양·이웃으로 구간 추정하는 신경망 (참고용, 판정에 안 씀). 건축물대장 표제부가 생기면 빈 칸을 먼저 채우고 남은 건물만 추정 |
 | 기준 추출 | 법안 요약문에서 `{용도, 면적, 층수, 연도}` 규칙 추출. 판정 시범 26건 중 24건은 Claude로 추출한 뒤 근거 문구가 원문에 그대로 있는지, 숫자가 근거에 있는지 자동 대조 (담당자 확인 전) |
 | 교차 확인 | 같은 법안을 세 방식(우리 AI 추출, 규칙 기반 추출, 팀원 AI 추출)으로 뽑아 같은 숫자면 「교차 확인됨」, 다르면 「확인 필요」 |
 | 건물 판정 | 규칙 × 건물 속성 → **대상 / 경계선 / 비대상 / 판정불가** |
@@ -131,7 +131,7 @@ law-impact-map/
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: |
 | [분야 분류](notebooks/field_classifier.ipynb) | 법안 제안이유 → 9개 분야 | 사람이 붙인 라벨 298건 | 규칙(법률명) 0.757, 로지스틱 회귀 0.808 (10회 평균 정확도) | Dense 128 → Softmax 9, **0.788 ± 0.043** | 지도·행정 화면 분야 필터, 확신도 0.6 미만 "분류 확인 필요", 에이전트 `classify_field` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_classifier.ipynb) |
 | [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 + 공동발의·제안일 위원회 소속(제안 시점 정보) | 다수 클래스 정확도 0.642, 로지스틱 회귀 AUC 0.722 | Dense 16 → Sigmoid, **AUC 0.718**, F1 0.56 (시간 분리 AUC 0.662, 공동발의 정보 넣기 전 0.625) | 행정 화면 법안 상세·목록 "통과 가능성(신경망 추정)", 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
-| [건물 층수 추정](notebooks/building_imputation.ipynb) | 건축물대장이 없는 건물의 지상층수(5구간) | 사창동 층수가 있는 건물 2,108동 | 최빈값 0.403, 이웃 8동 다수결 0.488, 로지스틱 회귀 0.540 | Dense 64-32 → Softmax 5, **0.547** (한 구간 차이까지 0.889) | 지도 건물 카드 "추정 지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
+| [건물 빈칸 추정](notebooks/building_imputation.ipynb) | 판정불가 원인 속성이 빈 건물의 연면적(4구간)·사용승인 연대(4구간)·지상층수(5구간) | 사창동에서 그 속성이 있는 건물 (연면적 2,112동, 사용승인 2,118동, 층수 2,108동) | 로지스틱 회귀 연면적 0.683·층수 0.521, 이웃 8동 다수결 사용승인 0.578 | 대상마다 Dense 64-32 → Softmax, 연면적 **0.693**, 사용승인 연대 **0.552** (이웃 다수결보다 낮음), 지상층수 **0.557** | 지도 건물 카드 "추정 연면적·사용승인 연대·지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
 
 - 노트북마다 같은 순서입니다: 문제 → 데이터 → 전처리 → 학습/테스트 분리 → 기준선 → 신경망 → 과적합 확인 → 은닉층 실험 → 오답 분석 → 결과표 → 화면에 쓰이는 곳.
 - 세 모델 모두 같은 특징의 로지스틱 회귀와 차이가 흔들림 범위 안입니다. 데이터가 적어 은닉층이 주는 이득이 작다는 것도 결과로 적었습니다.

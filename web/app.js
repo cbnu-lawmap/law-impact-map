@@ -280,20 +280,28 @@
 
   function buildingCard(p) {
     var demo = currentDemo();
+    // 값 출처: 브이월드 → 건축물대장 표제부(p.reg 에 채운 속성 이름) → 그래도 비면 신경망 추정(참고용)
+    function src(attr, html) {
+      return p.reg && p.reg.indexOf(attr) >= 0 ? html + ' <span class="muted">(건축물대장 표제부)</span>' : html;
+    }
     var rows = [
-      ["주용도", Judge.isEmpty(p.usability) ? val(null) : esc(Judge.useName(p.usability))],
-      ["연면적", Judge.isEmpty(p.totalarea) ? val(null) : fmt(p.totalarea) + "㎡"],
-      ["지상층수", val(p.grnd_flr, "층")],
-      ["사용승인일", Judge.isEmpty(p.useapr_day) ? val(null) : dateText(p.useapr_day)],
+      ["주용도", Judge.isEmpty(p.usability) ? val(null) : src("usability", esc(Judge.useName(p.usability)))],
+      ["연면적", Judge.isEmpty(p.totalarea) ? val(null) : src("totalarea", fmt(p.totalarea) + "㎡")],
+      ["지상층수", Judge.isEmpty(p.grnd_flr) ? val(null) : src("grnd_flr", val(p.grnd_flr, "층"))],
+      ["사용승인일", Judge.isEmpty(p.useapr_day) ? val(null) : src("useapr_day", dateText(p.useapr_day))],
       ["구조", Judge.isEmpty(p.strct_cd) ? val(null) : esc(Judge.structName(p.strct_cd))],
       ["PNU", val(p.pnu)],
     ];
-    // 지상층수가 빈 건물: 신경망 추정 구간 (notebooks/building_imputation.ipynb). 판정에는 쓰지 않음
-    if (Judge.isEmpty(p.grnd_flr) && !Judge.isEmpty(p.est_flr)) {
-      rows.splice(3, 0, ["추정 지상층수", esc(p.est_flr) +
-        ' <span class="muted">(신경망 추정' + (p.est_p ? " " + Math.round(p.est_p * 100) + "%" : "") +
+    // 속성이 빈 건물: 신경망 추정 구간 (notebooks/building_imputation.ipynb). 판정에는 쓰지 않음
+    // [속성, 구간 이름 키, 확률 키, 카드 이름, 넣을 자리(그 속성 줄 바로 아래)]
+    [["useapr_day", "est_year", "est_year_p", "추정 사용승인 연대", 4],
+     ["grnd_flr", "est_flr", "est_p", "추정 지상층수", 3],
+     ["totalarea", "est_area", "est_area_p", "추정 연면적", 2]].forEach(function (e) {
+      if (!Judge.isEmpty(p[e[0]]) || Judge.isEmpty(p[e[1]])) return;
+      rows.splice(e[4], 0, [e[3], esc(p[e[1]]) +
+        ' <span class="muted">(신경망 추정' + (p[e[2]] ? " " + Math.round(p[e[2]] * 100) + "%" : "") +
         ", 참고용 · 판정에 쓰지 않음)</span>"]);
-    }
+    });
     var html = '<div class="bcard"><h4>건물 속성</h4><table>' +
       rows.map(function (r) { return "<tr><th>" + r[0] + "</th><td>" + r[1] + "</td></tr>"; }).join("") +
       "</table>";
