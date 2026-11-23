@@ -423,6 +423,7 @@ EST = os.path.join(DATA, "building_imputation_pred.csv")   # notebooks/building_
 EST_TARGETS = (("area", "totalarea", "est_area", "est_area_p"),
                ("year", "useapr_day", "est_year", "est_year_p"),
                ("flr", "grnd_flr", "est_flr", "est_p"))
+EST_METHOD_KEY = {"area": "est_area_m", "year": "est_year_m", "flr": "est_flr_m"}   # 쓴 방법 (신경망 / 이웃 8동 다수결)
 
 
 def load_estimates(features):
@@ -439,7 +440,7 @@ def load_estimates(features):
                 raise ValueError(f"building_imputation_pred.csv idx {i} 의 PNU 가 건물 자료와 다름 (노트북을 다시 실행할 것)")
             for t, _, _, _ in EST_TARGETS:
                 if r.get(f"est_{t}") and r.get(f"est_{t}_p"):
-                    est.setdefault(i, {})[t] = (r[f"est_{t}"], round(float(r[f"est_{t}_p"]), 2))
+                    est.setdefault(i, {})[t] = (r[f"est_{t}"], round(float(r[f"est_{t}_p"]), 2), r.get(f"est_{t}_method") or "신경망")
     return est
 
 
@@ -560,7 +561,7 @@ def main():
         # ③ 그래도 빈 속성에만 신경망 추정 구간 (참고용). judge() 는 est_* 를 읽지 않으므로 판정에 쓰이지 않는다
         for t, attr, k_lab, k_p in EST_TARGETS:
             if t in est.get(i, {}) and empty(props[attr]):
-                props[k_lab], props[k_p] = est[i][t]
+                props[k_lab], props[k_p], props[EST_METHOD_KEY[t]] = est[i][t]
                 n_est[t] += 1
     if est:
         print(f"  추정값 (참고용, 판정에 안 씀): 연면적 {n_est['area']}동, 사용승인 연대 {n_est['year']}동, 지상층수 {n_est['flr']}동")

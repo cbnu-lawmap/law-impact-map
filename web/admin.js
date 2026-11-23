@@ -345,12 +345,14 @@
     html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
     html += newBillsCard();
     html += nearPassCard();
+    html += passTierSummary();
 
     html += '<h3 id="todo-h">지금 할 일<span class="aside">순서는 검토 순서에만 씁니다. 법 적용 여부를 정하지 않습니다.</span></h3><div class="todo-cards" id="todo-cards">' +
       todoList().map(function (t, i) {
         return '<article class="todo"><div class="top-line"><span class="rank">' + (i + 1) + "순위</span>" + pgMark(t.no) + "</div>" +
           '<p class="act">' + esc(t.act) + "</p>" +
-          '<ul class="facts"><li><span>법안</span><b>' + esc(t.name) + "</b></li><li><span>사창동</span>" + esc(t.why) + "</li></ul>" +
+          '<ul class="facts"><li><span>법안</span><b>' + esc(t.name) + "</b></li><li><span>사창동</span>" + esc(t.why) + "</li>" +
+          (passTier(D.byNo[t.no] || {}) ? "<li><span>통과 가능성</span>" + esc(tierText(passTier(D.byNo[t.no]))) + "</li>" : "") + "</ul>" +
           "<details><summary>근거 보기</summary><p><b>어디부터</b> " + esc(t.from) + "</p><p><b>근거</b> " + esc(t.basis) + "</p></details>" +
           '<div class="foot"><span>의안 ' + esc(t.no) + '</span><a class="btn ghost" href="#/bill/' + t.no + '">법안 열기</a></div></article>';
       }).join("") + "</div>";
@@ -396,6 +398,15 @@
   }
 
   // 상황판 카드: 곧 통과될 수 있는 법안 (법사위 회부 이후이고 아직 진행 중)
+  // 상황판: 계류 법안의 통과 가능성 구간별 건수 (구간마다 비슷한 과거 법안 반영률)
+  function passTierSummary() {
+    var T = D.passTiers || [];
+    if (!T.length) return "";
+    var cnt = {};
+    D.bills.forEach(function (b) { var t = passTier(b); if (t) cnt[t.name] = (cnt[t.name] || 0) + 1; });
+    return '<div class="card" style="margin-top:16px"><h3 style="margin-top:0">통과 가능성 구간</h3><p class="muted small">팀이 직접 학습한 신경망 추정 · 제안한 날 알 수 있는 정보만 사용 · 반영률은 21대 국회 나중에 낸 법안으로 검증한 값 · 법안의 좋고 나쁨과 무관</p><ul class="facts">' +
+      T.map(function (t) { return "<li><span>" + esc(tierText(t)) + "</span><b>" + fmt(cnt[t.name] || 0) + "건</b></li>"; }).join("") + "</ul></div>";
+  }
   function nearPassCard() {
     var near = D.bills.filter(Judge.isNearPass).sort(function (a, b) {
       return Judge.stageRank(a.stage) - Judge.stageRank(b.stage) || (a.stage_date < b.stage_date ? 1 : a.stage_date > b.stage_date ? -1 : 0);
@@ -413,7 +424,7 @@
         var d = D.demos[b.no];
         var hit = d ? '<span class="tag done">대상·경계선 ' + fmt(d.counts.대상 + d.counts.경계선) + "동</span>" : '<span class="tag wait">기준 추출 대기</span>';
         return '<tr><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + '</a><div class="muted small">의안 ' + esc(b.no) + " · " + esc(b.committee) +
-          "</div></td><td>" + stageTag(b, true) + "</td><td>" + hit + "</td></tr>";
+          "</div></td><td>" + stageTag(b, true) + "</td><td>" + hit + "</td><td>" + passCell(b) + "</td></tr>";
       }).join("") + "</tbody></table>" +
         (near.length > 5 ? '<p class="small near-more"><a href="#/bills" id="near-more">' + fmt(near.length) + "건 모두 보기</a></p>" : "");
     }
@@ -665,21 +676,27 @@
     for (var i = 0; i < T.length; i++) if (b.pass_prob < T[i].max) return T[i];
     return T[T.length - 1];
   }
+  // 화면에 보일 구간 이름. 가장 높은 구간도 실제 반영률이 20%대라 "높음" 대신 "상대적으로 높음"
+  var TIER_LABEL = { 낮음: "낮음", 보통: "보통", 높음: "상대적으로 높음" };
+  function tierLabel(t) { return TIER_LABEL[t.name] || t.name; }
+  // 예: "보통 (비슷한 과거 법안 반영률 10%)"
+  function tierText(t) { return tierLabel(t) + " (비슷한 과거 법안 반영률 " + Math.round(t.actual_rate * 100) + "%)"; }
   function passPct(b) {
     if (b.pass_prob == null) return "";
     var t = passTier(b);
-    return t ? t.name : Math.round(b.pass_prob * 100) + "%";
+    return t ? tierLabel(t) : Math.round(b.pass_prob * 100) + "%";
   }
   function passCell(b) {
     var t = passTier(b);
     if (!t) return esc(passPct(b));
     return '<span class="pass-tier pass-' + ({ 낮음: "lo", 보통: "mid", 높음: "hi" }[t.name] || "mid") + '" title="신경망 추정 ' +
-      Math.round(b.pass_prob * 100) + "% · 같은 구간 21대 실제 반영률 " + Math.round(t.actual_rate * 100) + '%">' + esc(t.name) + "</span>";
+      Math.round(b.pass_prob * 100) + "% · 비슷한 과거 법안 반영률 " + Math.round(t.actual_rate * 100) + '%">' + esc(tierLabel(t)) +
+      ' <span class="muted small">' + Math.round(t.actual_rate * 100) + "%</span></span>";
   }
   function passLine(b) {
     if (b.pass_prob == null) return "";
     var t = passTier(b);
-    var head = t ? "통과 가능성 " + t.name + " (같은 구간 21대 실제 반영률 " + Math.round(t.actual_rate * 100) + "%)" : "통과 가능성 " + passPct(b);
+    var head = t ? "통과 가능성 " + tierText(t) : "통과 가능성 " + passPct(b);
     var tip = "신경망 추정 확률 " + Math.round(b.pass_prob * 100) + "%" +
       (t ? " · 구간과 실제 반영률은 21대 나중에 낸 법안(먼저 낸 법안으로 학습한 시간 분리 시험)에서 정함" : "");
     return '<p class="small muted" style="margin-top:-6px" title="' + esc(tip) + '">' + esc(head) +
