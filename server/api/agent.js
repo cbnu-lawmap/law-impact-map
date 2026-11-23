@@ -17,6 +17,13 @@
  * 결과는 AI 초안이며 사람 확인이 필요하다 (needs_human_review: true).
  * 모델 서버는 기본 OpenAI. AGENT_LLM_BASE_URL(·AGENT_LLM_MODEL·AGENT_LLM_KEY)을 주면 OpenAI 호환 로컬 서버(Ollama·vLLM 등)를 쓴다.
  *
+ * 방식 (POST 본문 mode 또는 ?mode=, 없으면 agent)
+ *   agent    지금까지의 도구 고르기 에이전트 (기본값, 기존 화면·호출은 그대로)
+ *   agentic  Agentic RAG: search_sources 로 출처를 찾고 코드 규칙으로 근거를 평가해 부족하면 다음 출처를 찾는다 (lib/agentic.js)
+ *   rag1     질의 도우미식 1회 RAG: 요약 한 번, 모델 호출 한 번으로 기준 뽑기, 코드로 대조·판정 (lib/agentic.js)
+ *   비교 스크립트(scripts/compare-rag.js)용으로 AGENT_COMPARE_TOKEN 환경변수와 같은 x-compare-token 헤더를 보내면
+ *   IP당 호출 수 제한과 사이트 확인, 10분 저장을 건너뛴다. 환경변수가 비어 있으면 이 길은 닫혀 있다.
+ *
  * 로컬 시험: AGENT_MOCK=1 이면 OpenAI 대신 정해진 순서로 도구를 부르는 가짜 모델을 쓴다 (키 없이 시험).
  *   Vercel(VERCEL 환경변수가 있음)이나 NODE_ENV=production 에서는 가짜 모델을 절대 쓰지 않는다.
  *   DATA_DIR=web/data 를 주면 공개 사이트 대신 로컬 파일을 읽는다.
@@ -28,6 +35,10 @@ const {
 const Judge = require("../lib/judge");
 const Criteria = require("../lib/criteria");
 const { loadModel } = require("../lib/nn");
+const Agentic = require("../lib/agentic");
+const Sources = require("../lib/sources");
+const crypto = require("crypto");
+const MODES = ["agent", "agentic", "rag1"];
 
 const MAX_STEPS = 8;
 const TOKEN_CAP = 12000;
@@ -54,6 +65,8 @@ async function loadData() {
     loadJson("bills.json"), loadJson("demo_rules.json"), loadJson("crosscheck.json"), loadJson("buildings.geojson"),
     loadJson("summaries.json").catch(() => null),   // 제안이유 전문 (없으면 bills.json 의 300자 요약)
   ]);
+  // 재검색 출처 (법안 원문 개정 부분, 검토보고서 문장). 없으면 search_sources 가 "없음" 으로 답한다
+  const docs = await loadJson("bill_docs.json").catch(() => null);
   const demos = {};
   d.demos.forEach((v) => { demos[v.bill_no] = v; });
   // 판정에 필요한 속성만 남긴다 (PNU 도 쓰지 않음)
@@ -70,7 +83,7 @@ async function loadData() {
   ]);
   const models = { field: fm ? loadModel(fm) : null, pass: pm || null };
   const full = (sm && sm.summaries) || {};
-  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models, full };
+  dataCache = { at: Date.now(), byNo, demos, region: d.region, total: d.total, cross: x, props, fields: b.fields, models, full, docs: (docs && docs.docs) || {} };
   return dataCache;
 }
 
@@ -167,7 +180,7 @@ function openaiLLM(key, model, url = OPENAI_URL) {
   }
   return {
     name: model,
-    chat: (messages, maxTokens) => call({ messages, tools: TOOLS, tool_choice: "auto", parallel_tool_calls: false, max_tokens: maxTokens }),
+    chat: (messages, maxTokens, tools) => call({ messages, tools: tools || TOOLS, tool_choice: "auto", parallel_tool_calls: false, max_tokens: maxTokens }),
     complete: async (system, user, maxTokens, json) => {
       const r = await call({
         messages: [{ role: "system", content: system }, { role: "user", content: user }],
@@ -390,6 +403,8 @@ async function run(D, no, note, llm) {
     }
     const v = Criteria.verify(cands, fullText);
     state.extracted = v;
+    // 근거 평가 (Agentic RAG 와 같은 코드 규칙, 요약 한 출처만). 응답의 evaluation 으로 세 방식을 같은 틀로 비교한다
+    state.evaluation = Sources.mergeEvaluations([Object.assign(Sources.evaluateSource("summary", fullText, cands), { source: "summary", found: true })]);
     // 확인용: 모델이 낸 후보 수와 원문 대조 결과 (notebooks/local_llm_extraction.ipynb 의 비교와 같은 셈)
     state.extraction = {
       method: how, model: llm.name, candidates_n: cands.length, passed: v.evidence.length,
@@ -624,7 +639,12 @@ async function run(D, no, note, llm) {
   return {
     no,
     name: bill.name,
+    mode: "agent",
     steps: state.steps,
+    step_count: state.steps.length,
+    evaluation: state.evaluation ? state.evaluation.criteria : [],
+    revived: [],
+    sources_used: [{ source: "summary", source_ko: Sources.SOURCE_KO.summary, found: !!fullText }],
     draft: state.draft,
     rule: state.judged ? state.judged.rule : state.extracted ? state.extracted.rule : null,
     evidence: state.extracted ? state.extracted.evidence : [],
@@ -649,6 +669,19 @@ async function run(D, no, note, llm) {
 }
 
 // ---------------------------------------------------------------- 핸들러
+function queryMode(req) {
+  if (req.query && req.query.mode) return String(req.query.mode);
+  const m = /[?&]mode=([a-z0-9]+)/.exec(String(req.url || ""));
+  return m ? m[1] : "";
+}
+// 비교 스크립트용 열쇠: 환경변수 AGENT_COMPARE_TOKEN(16자 이상)과 헤더가 같을 때만. 코드에 열쇠를 넣지 않는다
+function compareAllowed(req, env = process.env) {
+  const want = String(env.AGENT_COMPARE_TOKEN || "");
+  const got = String((req.headers && req.headers["x-compare-token"]) || "");
+  if (want.length < 16 || got.length !== want.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(want));
+}
+
 module.exports = async function handler(req, res) {
   const okOrigin = cors(req, res);
   const mock = mockAllowed();
@@ -657,12 +690,15 @@ module.exports = async function handler(req, res) {
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
   if (req.method === "GET") { res.status(200).json({ ok: mock || cfg.ready, model: mock ? "mock" : MODEL }); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
-  if (!okOrigin) { res.status(403).json({ error: "허용하지 않은 사이트입니다" }); return; }
-  if (limited(clientIp(req))) { res.status(429).json({ error: "요청이 너무 잦습니다. 1분 뒤에 다시 해 주세요." }); return; }
+  const compare = compareAllowed(req);
+  if (!okOrigin && !compare) { res.status(403).json({ error: "허용하지 않은 사이트입니다" }); return; }
+  if (!compare && limited(clientIp(req))) { res.status(429).json({ error: "요청이 너무 잦습니다. 1분 뒤에 다시 해 주세요." }); return; }
 
   const body = readBody(req);
   const no = String(body.bill || "").trim();
   const note = String(body.note || "").trim().slice(0, 200);
+  const mode = String(body.mode || queryMode(req) || "agent").trim();
+  if (!MODES.includes(mode)) { res.status(400).json({ error: "mode 는 " + MODES.join(", ") + " 중 하나입니다" }); return; }
   if (!/^\d{7}$/.test(no)) { res.status(400).json({ error: "의안번호는 7자리 숫자여야 합니다" }); return; }
   if (PII.test(note)) { res.status(200).json({ fixed: true, answer: PII_ANSWER, steps: [], needs_human_review: true }); return; }
   if (PERSONAL_JUDGE.test(note)) { res.status(200).json({ fixed: true, answer: PERSONAL_ANSWER, steps: [], needs_human_review: true }); return; }
@@ -670,12 +706,14 @@ module.exports = async function handler(req, res) {
   try {
     const D = await loadData();
     if (!D.byNo[no]) { res.status(404).json({ error: "의안번호 " + no + " 법안을 찾지 못했습니다" }); return; }
-    const key = no + "|" + note;
-    const hit = cacheGet(key);
+    const key = no + "|" + note + (mode === "agent" ? "" : "|" + mode); // agent 는 예전과 같은 열쇠
+    const hit = compare ? null : cacheGet(key);
     if (hit) { res.status(200).json(Object.assign({}, hit, { cached: true })); return; }
     if (!mock && !cfg.ready) { res.status(503).json({ error: "AI 키가 설정되지 않았습니다" }); return; }
     const llm = mock ? mockLLM() : openaiLLM(cfg.key, MODEL, cfg.url);
-    const out = await run(D, no, note, llm);
+    const limits = { TOKEN_CAP, MAX_STEPS, CALL_MAX_TOKENS, DRAFT_MAX_TOKENS };
+    const out = mode === "agent" ? await run(D, no, note, llm)
+      : await (mode === "agentic" ? Agentic.runAgentic : Agentic.runRag1)({ D, no, note, llm, limits, EXTRACT_PROMPT });
     results.set(key, { at: Date.now(), body: out });
     res.status(200).json(out);
   } catch (e) {
@@ -684,4 +722,4 @@ module.exports = async function handler(req, res) {
 };
 
 // 시험용 (node server/scripts/test-agent.js)
-module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP, llmConfig, OPENAI_URL, EXTRACT_PROMPT };
+module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP, llmConfig, OPENAI_URL, EXTRACT_PROMPT, compareAllowed, MODES };
