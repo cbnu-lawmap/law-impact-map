@@ -819,6 +819,9 @@
       '<a class="btn ghost" href="' + esc(b.link) + '" target="_blank" rel="noopener">의안정보시스템 원문</a>' +
       '<button type="button" class="btn ghost ai-only" id="ask-this">이 법안 질문하기</button>' +
       '<button type="button" class="btn ghost ai-only" id="agent-run">에이전트로 검토 초안 만들기</button>' +
+      '<label class="ai-only agent-mode-pick"><span class="muted small">방식</span> <select id="agent-mode" aria-label="검토 방식">' +
+      AGENT_MODES.map(function (m) { return '<option value="' + m[0] + '"' + (m[0] === agentMode ? " selected" : "") + ">" + esc(m[1]) + "</option>"; }).join("") +
+      "</select></label>" +
       (demo ? '<a class="btn" href="#/print/' + no + '">검토서 인쇄·한글</a>' : "") + "</div>";
 
     if (!demo) {
@@ -1434,6 +1437,87 @@
   // 서버의 AI 가 도구(법안 읽기, 기준 뽑기, 출처 비교, 건물 판정, 초안 쓰기)를 골라 부른 순서와 이유, 결과, 초안을 보인다.
   var agentState = {}; // 번호 -> { busy } | { result } | { error }  (화면을 다시 그려도 남게)
   var AGENT_TOOLS = ["법안 정보 읽기", "적용 기준 뽑기", "출처별 기준 비교", "건물 판정 집계", "검토 초안 쓰기"];
+  // 서버 mode: agent(기본, 도구 고르기) / agentic(Agentic RAG, 부족하면 다음 출처) / rag1(요약 한 번 찾는 1회 RAG)
+  var AGENT_MODES = [["agent", "에이전트 (도구 고르기)"], ["agentic", "Agentic RAG (재검색)"], ["rag1", "1회 RAG"]];
+  var agentMode = "agent";
+  var SRC_KO = { summary: "요약", bill_text: "법안 원문", review_report: "검토보고서", similar_rules: "비슷한 규칙" };
+
+  // RAG 와 Agentic RAG 흐름 그림. 결과의 단계 기록으로 지나온 단계를 칠하고 마지막 단계를 굵게 표시한다
+  function flowHtml(mode, j) {
+    var busy = !j;
+    var steps = (j && j.steps) || [];
+    var found = {}, evalOf = {};
+    steps.forEach(function (s) {
+      if (s.tool === "search_sources" && s.ok !== false) found[s.source] = /: 없음/.test(s.summary || "") ? "없음" : "찾음";
+      if (s.tool === "evaluate_evidence") evalOf[s.source] = s.summary || "";
+      if (s.tool === "get_bill" || s.tool === "extract_criteria") found.summary = found.summary || "찾음";
+    });
+    var has = function (t) { return steps.some(function (s) { return s.tool === t && s.ok !== false; }); };
+    var judged = !!(j && j.counts);
+    var drafted = has("draft_review");
+    function st(on, done) { return busy ? "" : done ? "done" : on; }
+    function evalSub(src) {
+      var t = evalOf[src];
+      if (found[src] === "없음") return "없음";
+      if (!t) return "";
+      if (src === "similar_rules") return "후보만 (사람 확인 필요)";
+      if (/다음 출처/.test(t)) return "부족, 다음 출처로";
+      return "평가 끝";
+    }
+    // 1회 RAG (에이전트 방식도 찾는 출처는 요약 하나라 이 줄에 그린다)
+    var ragOn = mode !== "agentic";
+    var rag = [
+      ["요약 찾기", busy && ragOn ? "now" : st("", !!found.summary), ""],
+      ["기준 뽑기", st("", has("extract_criteria")), ""],
+      ["근거 평가", st("", has("evaluate_evidence") || !!(j && j.evaluation && j.evaluation.length)), ""],
+      ["판정", st("", judged), ""],
+      ["초안", st("", drafted), ""],
+    ];
+    var agOn = mode === "agentic";
+    var ag = ["summary", "bill_text", "review_report", "similar_rules"].map(function (src) {
+      return [SRC_KO[src] + (src === "similar_rules" ? " (후보)" : ""), busy ? (src === "summary" && agOn ? "now" : "") : found[src] ? "done" : "skip", busy ? "" : evalSub(src)];
+    }).concat([["판정", st("", judged), ""], ["초안", st("", drafted), ""]]);
+    function markLast(list, on) {
+      if (busy || !on) return;
+      var last = -1;
+      list.forEach(function (x, i) { if (x[1] === "done") last = i; });
+      if (last >= 0) list[last][1] = "done now";
+    }
+    markLast(rag, ragOn);
+    markLast(ag, agOn);
+    function row(name, note, on, list) {
+      return '<div class="fl-row' + (on ? " on" : "") + '"><div class="fl-name">' + esc(name) + (note ? ' <span class="muted small">' + esc(note) + "</span>" : "") + "</div>" +
+        '<ol class="fl-boxes">' + list.map(function (x) {
+          return '<li class="fl-box ' + (on ? x[1] : "") + '"><b>' + esc(x[0]) + "</b>" + (on && x[2] ? "<span>" + esc(x[2]) + "</span>" : "") + "</li>";
+        }).join("") + "</ol></div>";
+    }
+    return '<div class="agent-flow" role="group" aria-label="RAG 와 Agentic RAG 흐름">' +
+      row("1회 RAG", mode === "agent" ? "에이전트 방식도 출처는 요약 한 번" : "요약을 한 번 찾고 끝", ragOn, rag) +
+      row("Agentic RAG", "출처마다 코드 규칙으로 근거 평가, 부족하면 다음 출처 (재검색 최대 3번)", agOn, ag) +
+      "</div>";
+  }
+
+  // 기준별 근거 평가 (코드 규칙), 재검색으로 확인한 기준, 후보 규칙
+  function evalHtml(j) {
+    var html = "";
+    if (j.evaluation && j.evaluation.length) {
+      html += '<div class="field-label" style="margin-top:10px">기준별 근거 평가 (코드 규칙: 원문 대조, 수치·단위, 개정문 여부)</div>' +
+        '<div class="table-wrap"><table class="dt"><thead><tr><th>기준</th><th>평가</th><th>출처</th><th>근거 문구</th></tr></thead><tbody>' +
+        j.evaluation.map(function (c) {
+          return "<tr><td>" + esc(c.attr) + '</td><td style="white-space:nowrap"><span class="tag ' + (c.status === "판정에 충분" ? "ok" : c.status === "위임 확인" ? "wait" : "check") + '">' + esc(c.status) + "</span>" +
+            (c.revived_by ? ' <span class="tag wait">재검색으로 확인</span>' : "") + "</td><td>" + esc(c.source ? SRC_KO[c.source] || c.source : "-") +
+            '</td><td class="small">' + esc(c.quote || "") + "</td></tr>";
+        }).join("") + "</tbody></table></div>";
+    }
+    if (j.search_stop) html += '<p class="small muted" style="margin:4px 0">찾기를 멈춘 이유: ' + esc(j.search_stop) + "</p>";
+    if (j.candidates && j.candidates.length) {
+      html += '<div class="field-label" style="margin-top:10px">비슷한 법안의 규칙 <span class="tag check">후보 규칙, 사람 확인 필요</span></div>' +
+        '<ul class="small" style="margin:4px 0 0;padding-left:18px">' + j.candidates.map(function (c) {
+          return "<li>" + esc(c.no) + " " + esc(c.title) + ' <span class="muted">(유사도 ' + esc(c.score) + ", " + esc(ruleText(c.rule).join(" · ")) + ")</span></li>";
+        }).join("") + '</ul><p class="small muted" style="margin:4px 0">후보 규칙은 판정에 쓰지 않았습니다. 추정이며 사람 확인 전입니다.</p>';
+    }
+    return html;
+  }
   function agentBox(no) {
     return '<div class="ai-only no-print" id="agent-box" aria-live="polite">' + agentHtml(no) + "</div>";
   }
@@ -1447,6 +1531,7 @@
     if (st.busy) {
       return '<div class="card agent-card">' + agentHead() +
         '<p class="muted small" style="margin:6px 0">에이전트가 도구를 골라 부르며 검토하는 중입니다. 보통 10초에서 30초쯤 걸립니다 (최대 8단계).</p>' +
+        flowHtml(st.mode || "agent", null) +
         '<ol class="agent-steps">' + AGENT_TOOLS.map(function (t) {
           return '<li class="wait"><b>' + esc(t) + '</b> <span class="muted small">순서는 에이전트가 정합니다</span></li>';
         }).join("") + "</ol></div>";
@@ -1458,8 +1543,10 @@
     if (j.fixed) return '<div class="card agent-card">' + agentHead() + '<div class="note-box">' + esc(j.answer) + "</div></div>";
     var html = '<div class="card agent-card">' + agentHead(j);
     html += '<p class="small muted" style="margin:6px 0 10px">AI 가 고른 순서대로 적었습니다. 판정은 건축물 데이터로 추정한 결과이며 법률 판단이 아닙니다. 담당자가 원문과 대조한 뒤에 쓰세요.</p>';
+    html += flowHtml(j.mode || "agent", j);
     html += '<ol class="agent-steps">' + (j.steps || []).map(function (s) {
       return "<li" + (s.ok ? "" : ' class="bad"') + "><b>" + esc(s.tool_ko || s.tool) + "</b>" +
+        (s.auto ? ' <span class="tag wait">코드 자동</span>' : s.by_server ? ' <span class="tag wait">서버 마무리</span>' : "") +
         '<div class="small"><span class="muted">고른 이유</span> ' + esc(s.why) + "</div>" +
         '<div class="small"><span class="muted">결과</span> ' + esc(s.summary) + "</div></li>";
     }).join("") + "</ol>";
@@ -1478,6 +1565,7 @@
     } else {
       html += '<p class="small muted">근거가 확인된 기준이 없어 건물 판정은 하지 않았습니다.</p>';
     }
+    html += evalHtml(j);
     var xc = j.crosscheck;
     if (xc) {
       html += '<div class="field-label" style="margin-top:10px">출처별 기준 비교</div><p class="small" style="margin:4px 0">' + esc(xc.summary) + "</p>";
@@ -1489,7 +1577,9 @@
           }).join("") + "</tbody></table></div>";
       }
     }
-    html += '<div class="toolbar" style="margin:10px 0 0"><span class="muted small">모델 ' + esc(j.model) + (j.tokens != null ? " · 토큰 " + fmt(j.tokens) : "") +
+    var modeName = (AGENT_MODES.filter(function (m) { return m[0] === (j.mode || "agent"); })[0] || ["", j.mode])[1];
+    html += '<div class="toolbar" style="margin:10px 0 0"><span class="muted small">방식 ' + esc(modeName) + " · 모델 " + esc(j.model) + (j.tokens != null ? " · 토큰 " + fmt(j.tokens) : "") +
+      (j.step_count != null ? " · 단계 " + j.step_count : "") + (j.researches ? " · 재검색 " + j.researches + "번" : "") +
       '</span><span class="spacer"></span><button type="button" class="btn ghost" id="agent-again">다시 만들기</button></div>';
     return html + "</div>";
   }
@@ -1504,16 +1594,19 @@
   function bindAgent(no) {
     var b = document.getElementById("agent-run");
     if (b) b.addEventListener("click", function () { runAgent(no); });
+    var sel = document.getElementById("agent-mode");
+    if (sel) sel.addEventListener("change", function () { agentMode = sel.value; });
     bindAgentAgain(no);
   }
   function runAgent(no) {
     if (!prefs.ai) return; // 꺼져 있으면 서버에 묻지 않는다
     if (agentState[no] && agentState[no].busy) return;
-    agentState[no] = { busy: true };
+    var mode = agentMode;
+    agentState[no] = { busy: true, mode: mode };
     var btn = document.getElementById("agent-run");
     if (btn) btn.disabled = true;
     drawAgent(no);
-    fetch(AGENT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bill: no }) })
+    fetch(AGENT_URL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mode === "agent" ? { bill: no } : { bill: no, mode: mode }) })
       .then(function (r) { return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || "서버 응답 " + r.status); return j; }); })
       .then(function (j) { agentState[no] = { result: j }; })
       .catch(function (e) {
