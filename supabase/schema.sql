@@ -1,5 +1,6 @@
 -- 빼곡 Supabase 스키마 (시연용 클라우드 DB, 실제 도입 시 기관 내부 DB로 교체)
 -- 브라우저는 anon 키만 쓰므로 모든 표에 RLS 를 켜고, 쓰기는 정책·함수로만 허용한다.
+-- 이메일 로그인·members 부분은 migrations/003_no_login.sql 이 걷어 낸다 (브라우저는 읽기만, 쓰기는 서버 service_role).
 
 create extension if not exists vector;
 
