@@ -30,6 +30,8 @@
      - 이메일 로그인용 `members` 표, `my_role()`, `approve_review()` 를 지웁니다. `members` 에는 로그인 이메일(개인정보)만 있었고 이제 쓰지 않으므로 남기지 않습니다.
      - 예전 기록에 남은 이메일(수정자·결재자·기록의 누가)은 아이디 앞 두 글자 + `***` 로 가립니다. 이제 누구나 읽는 표이기 때문입니다.
      - 여러 번 실행해도 됩니다. 실시간 발행은 그대로 둡니다.
+   - `supabase/migrations/004_demo_reset.sql` (시연 전용, 아래 「시연 초기화」)
+     - `progress_reset()` 이 `review_progress` · `review_log` 의 모든 줄을 지우고 `agent_runs.human_edited` 만 false 로 되돌립니다 (`agent_runs` 줄은 남김). `security definer`, 실행 권한은 `service_role` 에만.
 2. **Realtime**: `review_progress` 가 `supabase_realtime` 발행에 들어 있는지 Database > Publications 에서 확인합니다.
 3. **이메일 로그인은 쓰지 않습니다.** Authentication > Providers > Email 은 꺼도 됩니다.
 
@@ -66,9 +68,19 @@ GET  → { ok }  서버에 서비스 키가 있으면 true
 POST { action: "set", role: "담당자", name, bill, status, memo }                 → { ok, row }
 POST { action: "set", role: "담당자", name, items: [{ bill, status, memo }] }     → { ok, saved, rows, failed }  (최대 50건)
 POST { action: "decide", role: "결재자", name, bill, decision: "승인" | "반려", reason } → { ok, row }
+POST { action: "reset", confirm: "초기화" }                                     → { ok, reset: { progress, log, runs_reset } }  (시연 전용)
 ```
 
 서버가 확인하는 것: 허용한 사이트(`server/lib/common.js` 의 CORS 목록, 아니면 403), IP당 1분 30회(넘으면 429), 이름 1~20자, 메모 300자, 반려 사유 100자, 의안번호 7자리이고 `bills.json` 에 있음, 이름·메모·사유에 전화번호·주민번호·이메일 모양이면 거절, 담당자는 상태·메모만(`set`), 결재자는 승인·반려만(`decide`). DB 함수도 같은 길이·값·순서(검토 완료된 법안만, 한 번만 결재)를 다시 확인합니다.
+
+## 시연 초기화 (시연 전용)
+
+발표·시연 전에 진행 기록과 결재 기록을 비워 처음 상태로 돌립니다. 실제 도입 시에는 이 동작과 `progress_reset()` 을 두지 않습니다 (기록은 지우지 않고 보존).
+
+- 터미널: `cd server && npm run demo:reset` (배포 서버 `https://ppaegok-api.vercel.app` 에 보냄, 키 필요 없음). 로컬은 `npm run demo:reset -- --base http://127.0.0.1:3000`.
+- 행정 화면 숨은 메뉴: `admin.html#reset` (화면 어디에도 링크하지 않음). 「초기화」 → 「정말 모두 지우기」 두 번 눌러야 지우고, 클라우드 모드면 진행 기록을 다시 읽습니다.
+- 서버가 확인하는 것: 허용한 사이트(CORS 목록)만, 확인 문구 `confirm` 이 정확히 `"초기화"` (아니면 400), IP당 1분 2회 (넘으면 429). 역할·이름은 받지 않습니다. 누구나 사이트 주소만 알면 부를 수 있으므로 시연 기간에만 둡니다.
+- `004_demo_reset.sql` 을 적용하기 전에는 DB 함수가 없어 502 가 납니다.
 
 ## 보안 정리
 
