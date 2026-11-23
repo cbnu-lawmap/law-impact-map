@@ -26,6 +26,12 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from http_retry import get_json, ApiError  # noqa: E402
 
+try:  # 로컬 수집: 저장소 .env 의 VWORLD_KEY (Actions 는 Secret 환경변수)
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
+except ImportError:
+    pass
+
 for _s in (sys.stdout, sys.stderr):
     if hasattr(_s, "reconfigure"):
         _s.reconfigure(encoding="utf-8")
