@@ -58,8 +58,11 @@ test("predict_pass: 모델 결과가 있으면 확률과 성능, 없으면 '모�
     const tiers = JSON.parse(fs.readFileSync(passPath, "utf8")).tiers || [];
     if (tiers.length) {
       const want = tiers.find((t) => b.pass_prob < t.max) || tiers[tiers.length - 1];
-      assert.strictEqual(r.body.pass_model.tier.name, want.name);
-      assert.ok(st.summary.indexOf("통과 가능성 " + want.name) === 0 && /같은 구간 21대 실제 반영률 \d+%/.test(st.summary), st.summary);
+      // 화면과 같은 이름 (가장 높은 구간은 "상대적으로 높음")과 "비슷한 과거 법안 반영률"
+      const label = { 낮음: "낮음", 보통: "보통", 높음: "상대적으로 높음" }[want.name] || want.name;
+      assert.strictEqual(r.body.pass_model.tier.name, label);
+      assert.ok(st.summary.indexOf("통과 가능성 " + label) === 0 && /비슷한 과거 법안 반영률 \d+%/.test(st.summary), st.summary);
+      assert.ok(st.auto && /자동 계산/.test(st.why), "predict_pass 는 자동 계산 단계여야 함");
     }
   } else {
     assert.strictEqual(st.ok, false);

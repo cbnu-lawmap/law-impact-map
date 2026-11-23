@@ -49,7 +49,9 @@ test("2206436 끝까지 실행: 도구 순서, 동수 = 시범 규칙 동수, �
   const r = await call(handler, { body: { bill: "2206436" } });
   assert.strictEqual(r.code, 200, JSON.stringify(r.body));
   const j = r.body;
-  assert.deepStrictEqual(j.steps.map((s) => s.tool), ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"]);
+  // 직접 학습한 모델 두 개는 코드가 먼저 자동 계산하고, 모델은 나머지 도구만 고른다
+  assert.deepStrictEqual(j.steps.map((s) => s.tool), ["classify_field", "predict_pass", "get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"]);
+  j.steps.slice(0, 2).forEach((s) => { assert.ok(s.auto && /자동 계산/.test(s.why), JSON.stringify(s)); });
   j.steps.forEach((s) => { assert.ok(s.why && s.summary && s.ok, JSON.stringify(s)); });
   const demo = demos.find((d) => d.bill_no === "2206436");
   // 제안이유 전문으로 뽑은 기준이 원문 대조를 통과하고 시범 규칙과 같다 (300자 요약일 때는 못 뽑아 시범 규칙을 썼음)
@@ -80,7 +82,7 @@ test("같은 법안 두 번째는 저장한 결과 (cached: true)", async () => 
   const r = await call(handler, { body: { bill: "2206436" } });
   assert.strictEqual(r.code, 200);
   assert.strictEqual(r.body.cached, true);
-  assert.strictEqual(r.body.steps.length, 5);
+  assert.strictEqual(r.body.steps.length, 7);
 });
 
 test("판정 시범이 아닌 법안: 원문 대조 통과 기준으로 판정, 근거는 제안이유 전문의 부분 문자열", async () => {
@@ -161,7 +163,8 @@ test("단계 제한: 모델이 끝없이 도구를 불러도 8단계에서 멈�
   const r = await call(handler, { body: { bill: "2206436" } });
   delete process.env.AGENT_MOCK_SCRIPT;
   assert.strictEqual(r.code, 200);
-  assert.strictEqual(r.body.steps.length, handler._test.MAX_STEPS);
+  // 단계 제한은 모델이 부른 도구만 센다 (자동 계산 2개 제외)
+  assert.strictEqual(r.body.steps.filter((s) => !s.auto).length, handler._test.MAX_STEPS);
   assert.ok(/단계/.test(r.body.limits.stopped));
   assert.ok(r.body.draft.length > 0, "멈춰도 틀 문장 초안은 있어야 함");
 });
@@ -173,7 +176,9 @@ test("토큰 제한: 합계 12,000 넘으면 멈춤", async () => {
   delete process.env.AGENT_MOCK_SCRIPT;
   assert.strictEqual(r.code, 200);
   assert.ok(/토큰/.test(r.body.limits.stopped), JSON.stringify(r.body.limits));
-  assert.ok(r.body.steps.length < 5);
+  assert.ok(r.body.steps.filter((s) => !s.auto).length < 5);
+  // 다음 호출의 출력 상한(max_tokens)까지 더해 넘을 것 같으면 그 호출 전에 멈춘다
+  assert.ok(/넘기 전에 멈춤/.test(r.body.limits.stopped), JSON.stringify(r.body.limits));
   assert.ok(r.body.tokens >= handler._test.TOKEN_CAP);
   handler._test.clearCache();
 });

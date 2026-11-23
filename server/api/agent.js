@@ -107,8 +107,7 @@ const TOOLS = [
     },
   },
   { name: "draft_review", description: "검토 초안 작성. 마지막에 한 번.", props: { no: noParam } },
-  { name: "classify_field", description: "직접 학습한 모델로 분야 분류 (결과 한 줄).", props: { no: noParam } },
-  { name: "predict_pass", description: "직접 학습한 모델의 통과 가능성 추정 (결과 한 줄).", props: { no: noParam } },
+  // classify_field, predict_pass 는 모델이 고르지 않는다: 루프 전에 코드가 계산해 첫 메시지에 넣는다
 ].map((t) => ({
   type: "function",
   function: {
@@ -120,7 +119,8 @@ const TOOLS = [
 
 const SYSTEM = [
   "너는 「빼곡」 법안 검토 도우미다. 도구를 하나씩 불러 검토 초안을 만든다.",
-  "순서: get_bill, classify_field, predict_pass, extract_criteria, crosscheck, judge_buildings, draft_review. reason 에 이유를 짧게 쓴다.",
+  "순서: get_bill, extract_criteria, crosscheck, judge_buildings, draft_review. reason 에 이유를 짧게 쓴다.",
+  "분야 분류와 통과 가능성은 첫 메시지에 이미 계산돼 있다 (직접 학습한 모델 추정). 초안에 그대로 쓴다.",
   "judge_buildings 에는 use_rule 을 그대로 넘기고, use_rule 이 null 이면 건너뛴다. 숫자를 지어내지 않는다.",
   "draft_review 뒤에는 '끝'이라고만 답한다.",
 ].join("\n");
@@ -164,9 +164,7 @@ function openaiLLM(key, model) {
 function mockLLM() {
   const script = process.env.AGENT_MOCK_SCRIPT || "normal";
   const tokens = script === "tokens" ? 5000 : 400;
-  const ORDER = script === "models"
-    ? ["get_bill", "classify_field", "predict_pass", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"]
-    : ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"];
+  const ORDER = ["get_bill", "extract_criteria", "crosscheck", "judge_buildings", "draft_review"];
   const WHY = {
     get_bill: "법안 요약과 진행 단계를 먼저 확인합니다.",
     extract_criteria: "요약에서 건물 기준을 뽑아 원문과 대조합니다.",
@@ -249,7 +247,8 @@ async function run(D, no, note, llm) {
   const fullText = (D.full && D.full[no]) || String(bill.summary || "").replace(/…$/, "");
   const fullUsed = !!(D.full && D.full[no]);
   const state = { steps: [], tokens: 0, stopped: "", bill: null, extracted: null, cross: null, judged: null, plan: null, delegation: [], field: null, pass: null, draft: "", draftCtx: "", unverified: [] };
-  const overBudget = () => state.tokens >= TOKEN_CAP;
+  // 다음 호출이 최대로 쓸 출력(max_tokens)까지 더해 상한을 넘지 않게 본다
+  const overBudget = (next = 0) => state.tokens + next >= TOKEN_CAP;
 
   // 판정에 넘긴 규칙은 원문 대조를 통과한 규칙이나 판정 시범 규칙과 똑같아야 한다.
   // 지어낸 수치·용도를 막고, 위임 같은 기준을 빼서 대상이 부풀려지는 것도 막는다.
@@ -307,7 +306,7 @@ async function run(D, no, note, llm) {
     if (state.cross) lines.push("출처별 비교: " + state.cross.summary);
     if (state.field) lines.push("분야(직접 학습 " + modelKo(state.field.metrics) + " 추정" + (state.field.needs_check ? ", 분류 확인 필요" : "") + "): " + state.field.top.map((t) => t.name + " " + Math.round(t.p * 100) + "%").join(", "));
     if (state.pass) lines.push("통과 가능성(직접 학습 신경망 추정): " +
-      (state.pass.tier ? state.pass.tier.name + " (같은 구간 21대 실제 반영률 " + Math.round(state.pass.tier.actual_rate * 100) + "%, 확률 " + Math.round(state.pass.p * 100) + "%)"
+      (state.pass.tier ? state.pass.tier.name + " (비슷한 과거 법안 반영률 " + Math.round(state.pass.tier.actual_rate * 100) + "%, 확률 " + Math.round(state.pass.p * 100) + "%)"
         : Math.round(state.pass.p * 100) + "%") +
       (state.pass.metrics.test_auc != null ? " (모델 시험 AUC " + state.pass.metrics.test_auc + ")" : ""));
     if (state.judged) {
@@ -337,7 +336,7 @@ async function run(D, no, note, llm) {
     ].filter(Boolean).join(" ");
 
     let text = "";
-    if (!overBudget()) {
+    if (!overBudget(DRAFT_MAX_TOKENS)) {
       const r = await llm.complete(
         "너는 지자체 법안 검토 담당자의 초안 작성을 돕는다. [자료]에 있는 내용과 숫자만 써서 한국어 검토 초안 한 문단(5문장 이내, 쉬운 존댓말)을 쓴다. " +
         "계산하거나 지어낸 숫자를 쓰지 않는다. [자료]에 판정 보류와 담당자 할 일이 있으면 그 내용을 꼭 쓴다. 판정은 건축물 데이터 기반 추정이며 법률 판단이 아니고 담당자 확인이 필요하다는 점을 끝에 적는다. 줄표(—)를 쓰지 않는다.",
@@ -357,7 +356,7 @@ async function run(D, no, note, llm) {
     let cands = Criteria.extractCandidates(fullText);
     let how = "정규식";
     if (llm.filterCandidates) cands = llm.filterCandidates(cands); // 시험용 가짜 모델만 (모델이 위임을 빠뜨린 경우 흉내)
-    if (llm.name !== "mock" && !overBudget()) {
+    if (llm.name !== "mock" && !overBudget(CALL_MAX_TOKENS)) {
       try {
         const r = await llm.complete(
           "법안 요약에서 건축물 적용 기준만 JSON 으로 뽑는다. 형식: {\"items\":[{\"attr\":\"용도|연면적|층수|사용승인|위임\",\"bound\":\"min|max\",\"value\":값,\"quote\":\"근거 문구\"}]}. " +
@@ -474,7 +473,9 @@ async function run(D, no, note, llm) {
     // 3단계 구간 (notebooks/pass_prediction.ipynb 10-3절, 시간 분리 시험에서 정한 경계와 구간별 실제 반영 비율)
     const tiers = Array.isArray(pm.tiers) ? pm.tiers : [];
     const t = tiers.length ? (tiers.find((x) => p < x.max) || tiers[tiers.length - 1]) : null;
-    const tier = t ? { name: t.name, actual_rate: t.actual_rate, n: t.n, min: t.min, max: t.max } : null;
+    // 화면과 같은 이름: 가장 높은 구간도 실제 반영률이 20%대라 "상대적으로 높음"
+    const LABEL = { 낮음: "낮음", 보통: "보통", 높음: "상대적으로 높음" };
+    const tier = t ? { name: LABEL[t.name] || t.name, actual_rate: t.actual_rate, n: t.n, min: t.min, max: t.max } : null;
     state.pass = { p, tier, metrics: pm.metrics || {} };
     return { pass_prob: p, tier: tier ? tier.name : null, tier_actual_rate: tier ? tier.actual_rate : null,
       label: tier ? "통과 가능성 " + tier.name : p >= (pm.threshold || 0.5) ? "통과 가능성 높음" : "통과 가능성 낮음",
@@ -547,7 +548,7 @@ async function run(D, no, note, llm) {
         ` · ${modelKo(r.model)}` + (r.model && r.model.test_acc != null ? ` 모델 시험 정확도 ${Math.round(r.model.test_acc * 100)}%` : "");
     }
     if (name === "predict_pass") {
-      return (r.tier ? `${r.label} (같은 구간 21대 실제 반영률 ${Math.round(r.tier_actual_rate * 100)}%, 신경망 추정 ${Math.round(r.pass_prob * 100)}%, 모델 추정)`
+      return (r.tier ? `${r.label} (비슷한 과거 법안 반영률 ${Math.round(r.tier_actual_rate * 100)}%, 신경망 추정 ${Math.round(r.pass_prob * 100)}%, 모델 추정)`
         : `${r.label} (${Math.round(r.pass_prob * 100)}%, 모델 추정)`) +
         " · 제안한 날 알 수 있는 정보만 사용" + (r.model && r.model.test_auc != null ? ` · 모델 시험 AUC ${r.model.test_auc}` : "");
     }
@@ -555,13 +556,21 @@ async function run(D, no, note, llm) {
     return "";
   }
 
+  // 필수 계산: 직접 학습한 모델 두 개는 모델이 고르게 두지 않고 코드가 먼저 계산한다 (단계 기록에는 "자동 계산")
+  const auto = [];
+  for (const name of ["classify_field", "predict_pass"]) {
+    const r = await exec(name, { no });
+    state.steps.push({ tool: name, tool_ko: TOOL_KO[name], why: "자동 계산 (도구를 고르기 전에 코드가 직접 계산)", summary: summarize(name, r), ok: !r.error, auto: true });
+    auto.push(TOOL_KO[name] + ": " + (r.error ? "없음 (" + r.error + ")" : summarize(name, r)));
+  }
   const messages = [
     { role: "system", content: SYSTEM },
-    { role: "user", content: "의안번호 " + no + " 법안의 검토 초안을 만들어 주세요." + (note ? " 검토 관점: " + note : "") },
+    { role: "user", content: "의안번호 " + no + " 법안의 검토 초안을 만들어 주세요." + (note ? " 검토 관점: " + note : "") +
+      "\n[자동 계산]\n" + auto.join("\n") },
   ];
   while (true) {
-    if (state.steps.length >= MAX_STEPS) { state.stopped = "단계 " + MAX_STEPS + "번에 도달해 멈춤"; break; }
-    if (overBudget()) { state.stopped = "토큰 " + fmt(TOKEN_CAP) + "개를 넘어 멈춤"; break; }
+    if (state.steps.filter((s) => !s.auto).length >= MAX_STEPS) { state.stopped = "단계 " + MAX_STEPS + "번에 도달해 멈춤"; break; }
+    if (overBudget(CALL_MAX_TOKENS)) { state.stopped = "토큰 " + fmt(TOKEN_CAP) + "개를 넘기 전에 멈춤"; break; }
     const r = await llm.chat(messages, CALL_MAX_TOKENS);
     state.tokens += r.tokens;
     const msg = r.message;
@@ -573,7 +582,8 @@ async function run(D, no, note, llm) {
       try { args = JSON.parse(call.function.arguments || "{}"); } catch (e) { args = {}; }
       const name = call.function.name;
       let result;
-      if (state.steps.length >= MAX_STEPS) result = { error: "단계 제한" };
+      if (state.steps.filter((s) => !s.auto).length >= MAX_STEPS) result = { error: "단계 제한" };
+      else if (name === "classify_field" || name === "predict_pass") result = { error: "이미 자동 계산함 (첫 메시지 참고)" };
       else {
         result = TOOL_KO[name] ? await exec(name, args) : { error: "모르는 도구" };
         state.steps.push({ tool: name, tool_ko: TOOL_KO[name] || name, why: String(args.reason || "(이유를 적지 않음)").slice(0, 160), summary: summarize(name, result), ok: !result.error });
