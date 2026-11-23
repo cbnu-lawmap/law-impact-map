@@ -15,6 +15,7 @@
  *   - CORS·IP당 호출 수·개인정보·개별 건물 판정 질문 거르기는 ask.js 와 같은 부품(lib/common.js)
  *   - judge_buildings 에 넘긴 규칙의 수치·용도는 원문 대조를 통과한 기준이나 시범 규칙에 있는 것만 받음
  * 결과는 AI 초안이며 사람 확인이 필요하다 (needs_human_review: true).
+ * 모델 서버는 기본 OpenAI. AGENT_LLM_BASE_URL(·AGENT_LLM_MODEL·AGENT_LLM_KEY)을 주면 OpenAI 호환 로컬 서버(Ollama·vLLM 등)를 쓴다.
  *
  * 로컬 시험: AGENT_MOCK=1 이면 OpenAI 대신 정해진 순서로 도구를 부르는 가짜 모델을 쓴다 (키 없이 시험).
  *   Vercel(VERCEL 환경변수가 있음)이나 NODE_ENV=production 에서는 가짜 모델을 절대 쓰지 않는다.
@@ -125,20 +126,43 @@ const SYSTEM = [
   "draft_review 뒤에는 '끝'이라고만 답한다.",
 ].join("\n");
 
+// 기준 뽑기 지시문 (extract_criteria). notebooks/local_llm_extraction.ipynb 도 data/verify_cases.json 을 거쳐 같은 글을 쓴다
+const EXTRACT_PROMPT =
+  "법안 요약에서 건축물 적용 기준만 JSON 으로 뽑는다. 형식: {\"items\":[{\"attr\":\"용도|연면적|층수|사용승인|위임\",\"bound\":\"min|max\",\"value\":값,\"quote\":\"근거 문구\"}]}. " +
+  "quote 는 요약 원문을 한 글자도 바꾸지 말고 그대로 옮긴 160자 이내 문구. 용도 value 는 주용도 코드 배열 (" +
+  Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자. " +
+  "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
+  "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.";
+
 // ---------------------------------------------------------------- 모델 (OpenAI 또는 시험용 가짜)
 function mockAllowed() {
   return process.env.AGENT_MOCK === "1" && !process.env.VERCEL && process.env.NODE_ENV !== "production";
 }
 
-function openaiLLM(key, model) {
+// 모델 서버 고르기 (환경변수만으로 바꾼다. 아무것도 주지 않으면 지금과 같은 OpenAI)
+//   AGENT_LLM_BASE_URL  OpenAI 호환 서버 주소 (예: 로컬 Ollama http://host:11434/v1, vLLM http://host:8000/v1)
+//   AGENT_LLM_MODEL     모델 이름 (예: qwen2.5:1.5b-instruct). 없으면 OPENAI_MODEL, 그것도 없으면 gpt-4o-mini
+//   AGENT_LLM_KEY       그 서버의 키 (없어도 됨). 다른 서버를 쓸 때 OpenAI 키는 보내지 않는다
+const OPENAI_URL = "https://api.openai.com/v1/chat/completions";
+function llmConfig(env = process.env) {
+  const base = String(env.AGENT_LLM_BASE_URL || "").trim().replace(/\/+$/, "");
+  const model = env.AGENT_LLM_MODEL || env.OPENAI_MODEL || "gpt-4o-mini";
+  if (!base) return { provider: "openai", url: OPENAI_URL, model, key: env.OPENAI_API_KEY || "", ready: !!env.OPENAI_API_KEY };
+  const url = /\/chat\/completions$/.test(base) ? base : base + "/chat/completions";
+  return { provider: "custom", url, model, key: env.AGENT_LLM_KEY || "", ready: true };
+}
+
+function openaiLLM(key, model, url = OPENAI_URL) {
   async function call(body) {
-    const r = await fetch("https://api.openai.com/v1/chat/completions", {
+    const headers = { "Content-Type": "application/json" };
+    if (key) headers.Authorization = "Bearer " + key;
+    const r = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + key },
+      headers,
       body: JSON.stringify(Object.assign({ model, temperature: 0.2 }, body)),
     });
     const j = await r.json();
-    if (!r.ok) throw new Error((j.error && j.error.message) || "OpenAI 오류 " + r.status);
+    if (!r.ok) throw new Error((j.error && j.error.message) || "모델 서버 오류 " + r.status);
     return { message: j.choices[0].message, tokens: (j.usage && j.usage.total_tokens) || 0 };
   }
   return {
@@ -358,13 +382,7 @@ async function run(D, no, note, llm) {
     if (llm.filterCandidates) cands = llm.filterCandidates(cands); // 시험용 가짜 모델만 (모델이 위임을 빠뜨린 경우 흉내)
     if (llm.name !== "mock" && !overBudget(CALL_MAX_TOKENS)) {
       try {
-        const r = await llm.complete(
-          "법안 요약에서 건축물 적용 기준만 JSON 으로 뽑는다. 형식: {\"items\":[{\"attr\":\"용도|연면적|층수|사용승인|위임\",\"bound\":\"min|max\",\"value\":값,\"quote\":\"근거 문구\"}]}. " +
-          "quote 는 요약 원문을 한 글자도 바꾸지 말고 그대로 옮긴 160자 이내 문구. 용도 value 는 주용도 코드 배열 (" +
-          Object.entries(Judge.USE_NAMES).map((x) => x[0] + " " + x[1]).join(", ") + "). 연면적은 ㎡, 층수는 층 수 숫자. " +
-          "'이상·초과' 는 min, '이하·미만' 은 max. 사용승인은 '준공 후 N년 이상' 을 before \"" + (Number(Criteria.REF_DATE.slice(0, 4)) + "-N") + Criteria.REF_DATE.slice(4) + "\" 형식 날짜로. " +
-          "위임 value 는 시행령(대통령령)·부령·조례에 넘긴 기준 이름(예: 용도, 규모) 한두 낱말이고, quote 에는 '대통령령으로 정하는' 같은 위임 문구가 그대로 있어야 한다. 그런 문구가 없으면 위임을 넣지 않는다.",
-          "[요약]\n" + fullText, CALL_MAX_TOKENS, true);
+        const r = await llm.complete(EXTRACT_PROMPT, "[요약]\n" + fullText, CALL_MAX_TOKENS, true);
         state.tokens += r.tokens;
         const items = JSON.parse(r.text).items;
         if (Array.isArray(items)) { cands = items; how = "AI"; }
@@ -372,6 +390,11 @@ async function run(D, no, note, llm) {
     }
     const v = Criteria.verify(cands, fullText);
     state.extracted = v;
+    // 확인용: 모델이 낸 후보 수와 원문 대조 결과 (notebooks/local_llm_extraction.ipynb 의 비교와 같은 셈)
+    state.extraction = {
+      method: how, model: llm.name, candidates_n: cands.length, passed: v.evidence.length,
+      dropped: v.dropped.map((d) => ({ attr: d.attr, why: d.why })), rule: v.rule,
+    };
     // 위임 문구는 모델과 상관없이 원문에서 코드로 찾는다 (모델이 빠뜨려도 같은 결과)
     state.delegation = Criteria.findDelegation(fullText).map((d) => ({ value: d.value, by: d.by, quote: d.quote }));
     state.plan = planFor(v);
@@ -605,6 +628,7 @@ async function run(D, no, note, llm) {
     draft: state.draft,
     rule: state.judged ? state.judged.rule : state.extracted ? state.extracted.rule : null,
     evidence: state.extracted ? state.extracted.evidence : [],
+    extraction: state.extraction || null,
     rule_source: state.judged ? state.judged.source : null,
     counts: state.judged ? state.judged.counts : null,
     hold: !state.judged && state.plan && state.plan.hold ? state.plan.hold : null,
@@ -628,9 +652,10 @@ async function run(D, no, note, llm) {
 module.exports = async function handler(req, res) {
   const okOrigin = cors(req, res);
   const mock = mockAllowed();
-  const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  const cfg = llmConfig();
+  const MODEL = cfg.model;
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
-  if (req.method === "GET") { res.status(200).json({ ok: mock || !!process.env.OPENAI_API_KEY, model: mock ? "mock" : MODEL }); return; }
+  if (req.method === "GET") { res.status(200).json({ ok: mock || cfg.ready, model: mock ? "mock" : MODEL }); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "POST만 받습니다" }); return; }
   if (!okOrigin) { res.status(403).json({ error: "허용하지 않은 사이트입니다" }); return; }
   if (limited(clientIp(req))) { res.status(429).json({ error: "요청이 너무 잦습니다. 1분 뒤에 다시 해 주세요." }); return; }
@@ -648,8 +673,8 @@ module.exports = async function handler(req, res) {
     const key = no + "|" + note;
     const hit = cacheGet(key);
     if (hit) { res.status(200).json(Object.assign({}, hit, { cached: true })); return; }
-    if (!mock && !process.env.OPENAI_API_KEY) { res.status(503).json({ error: "AI 키가 설정되지 않았습니다" }); return; }
-    const llm = mock ? mockLLM() : openaiLLM(process.env.OPENAI_API_KEY, MODEL);
+    if (!mock && !cfg.ready) { res.status(503).json({ error: "AI 키가 설정되지 않았습니다" }); return; }
+    const llm = mock ? mockLLM() : openaiLLM(cfg.key, MODEL, cfg.url);
     const out = await run(D, no, note, llm);
     results.set(key, { at: Date.now(), body: out });
     res.status(200).json(out);
@@ -659,4 +684,4 @@ module.exports = async function handler(req, res) {
 };
 
 // 시험용 (node server/scripts/test-agent.js)
-module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP };
+module.exports._test = { clearCache: () => { results.clear(); dataCache = null; }, TOOLS, MAX_STEPS, TOKEN_CAP, llmConfig, OPENAI_URL, EXTRACT_PROMPT };

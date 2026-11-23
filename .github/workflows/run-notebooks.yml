@@ -22,7 +22,7 @@ jobs:
     # 봇이 실행 결과를 커밋한 푸시는 다시 돌리지 않는다
     if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -39,7 +39,7 @@ jobs:
           cd notebooks
           for nb in *.ipynb; do
             echo "== $nb"
-            jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=1800 "$nb"
+            jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=3600 "$nb"
           done
       - name: Commit results
         run: |
