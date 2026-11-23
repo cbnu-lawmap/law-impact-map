@@ -141,6 +141,21 @@ law-impact-map/
 - 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다.
 - 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다. 공동발의 인원과 제안일에 소관 위원회 위원이었는지(숫자·0/1)는 `collect-process.yml`이 모은 `data/bills_process_21.csv`·`_22.csv`에서 가져옵니다. 위원회 상정처럼 제안 뒤에 생기는 정보는 노트북에서 비교만 하고 화면에는 쓰지 않습니다.
 
+### 로컬 LLM 비교 ([notebooks/local_llm_extraction.ipynb](notebooks/local_llm_extraction.ipynb)) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/local_llm_extraction.ipynb)
+
+**왜 로컬 LLM인가**: 지자체 업무망은 인터넷과 분리(망분리)돼 외부 AI API를 못 쓰는 경우가 많고, 모델을 기관 안에 두면 법안 원문·검토 메모가 외부로 나가지 않으며, 호출마다 드는 API 비용도 없습니다.
+노트북은 공개 모델 **Qwen2.5-1.5B-Instruct**(Apache-2.0)를 Hugging Face transformers로 CPU에서 돌려, 에이전트와 **같은 지시문·같은 원문 대조 규칙**으로 시범 법안 26건의 적용 기준을 뽑고 OpenAI gpt-4o-mini와 비교합니다. 파이썬으로 옮긴 원문 대조는 서버 `verify()` 결과를 담은 시험 사례(`data/verify_cases.json`, `server/scripts/verify-cases.js`)와 모두 같은지 먼저 확인합니다.
+
+| 시범 법안 26건 (같은 지시문·같은 원문 대조) | 로컬 Qwen2.5-1.5B-Instruct (CPU 4스레드) | OpenAI gpt-4o-mini (배포된 에이전트, 2026-11-23 수집) |
+| :--- | :---: | :---: |
+| 원문 대조 통과 후보 / 모델이 낸 후보 | 1 / 23 (4.3%) | 20 / 47 (42.6%) |
+| 기준이 하나라도 통과한 법안 | 1 | 14 |
+| 시범 규칙과 일치 · 부분 일치 · 틀림 · 못 뽑음 | 0 · 0 · 1 · 25 | 7 · 5 · 2 · 12 |
+| JSON 형식 실패 | 11 | 알 수 없음 (서버가 정규식으로 대신함) |
+| 시간 · 비용 | 31분 (법안당 71초), 비용·외부 전송 없음 | API 사용료, 원문 외부 전송 |
+
+1.5B 모델은 짧게 쓴 서버 지시문의 형식 설명(`"용도|연면적|…"`)을 값으로 베끼는 경우가 많아 거의 뽑지 못했습니다. 원문 대조가 이를 모두 걸러 내므로 틀린 기준이 판정에 들어가지는 않습니다. 실제로 쓰려면 예시를 붙인 지시문이나 7B 이상 모델이 필요합니다 (노트북 9절).
+
 <br />
 
 ## 🛠️ Tech Stack
@@ -193,6 +208,8 @@ AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 
 | :--- | :--- | :--- |
 | 질의 도우미 | `server/api/ask.js` | 질문과 관련된 법안을 단어 일치로 골라 그 내용만 근거로 답함. 답에 나온 숫자가 근거에 있는지 대조 |
 | 검토 에이전트 | `server/api/agent.js` | OpenAI 함수 호출로 모델이 도구(법안 조회, 기준 추출, 교차 확인, 건물 판정, 검토서 초안)를 골라 최대 8단계 실행. 근거 문구가 원문에 없으면 버림. 판정은 원문 대조를 통과한 기준이나 시범 규칙으로만 함. 한 번 실행 토큰 12,000 상한, 같은 법안 10분 캐시, IP당 1분 5회 |
+
+**로컬 모델로 바꾸기**: 검토 에이전트는 환경변수만으로 OpenAI 호환 서버(Ollama·vLLM 등)를 쓸 수 있습니다. `AGENT_LLM_BASE_URL`(예: `http://내부서버:11434/v1`), `AGENT_LLM_MODEL`(예: `qwen2.5:1.5b-instruct`, 없으면 `OPENAI_MODEL` 또는 `gpt-4o-mini`), `AGENT_LLM_KEY`(그 서버에 키가 있을 때만)를 주면 모든 모델 호출이 그 주소의 `/chat/completions`로 가고 OpenAI 키는 보내지 않습니다. 셋 다 비우면 지금처럼 OpenAI를 씁니다. 예: Ollama 서버에서 `ollama pull qwen2.5:1.5b-instruct` 뒤 `AGENT_LLM_BASE_URL=http://localhost:11434/v1 AGENT_LLM_MODEL=qwen2.5:1.5b-instruct npm run dev`. 어떤 모델이든 원문 대조를 통과한 기준만 판정에 쓰이고, 응답의 `extraction`(방법·후보 수·통과 수·버린 이유)으로 모델별 추출 결과를 비교할 수 있습니다. 질의 도우미(`ask.js`)는 OpenAI 그대로입니다.
 
 두 기능 모두 공개 법안 자료와 질문만 OpenAI로 보내며, 개인정보가 든 질문과 개별 건물 판정 질문은 서버에서 고정 문구로 거절합니다. 결과에는 항상 「사람 확인 필요」가 붙습니다.
 
