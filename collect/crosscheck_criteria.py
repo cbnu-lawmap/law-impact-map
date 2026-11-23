@@ -6,8 +6,9 @@
   B. 규칙 기반      data/criteria_rule.csv (extract_criteria.py, PR #18)
   C. 팀원 AI 추출   data/ai_feature_extraction.csv (PR #20, 머지 전)
                     파일이 없으면 git show origin/feature/ai-feature-extraction:data/ai_feature_extraction.csv 로 읽는다
-  D. 원문 정규식    (--docs 를 줄 때만) data/bill_docs/<의안번호>_원문.txt 에 server/lib/criteria.js 의 뽑기를 돌린 것
-                    (node server/scripts/compare-bill-docs.js --rules). 이때는 기본 출력 파일을 건드리지 않고
+  D. 원문 정규식    (--docs 를 줄 때만) data/bill_docs/<의안번호>_원문.txt 의 개정 부분(개정문 안의 새 글만.
+                    제안이유·정의 조문·부칙·대비표 제외)에 server/lib/criteria.js 의 뽑기를 돌린 것
+                    (node server/scripts/compare-bill-docs.js --rules, criteria.js 의 extractFromDoc). 이때는 기본 출력 파일을 건드리지 않고
                     data/criteria_crosscheck_docs.csv 만 쓰고, 원문 출처를 넣기 전후 판정 수를 출력한다
 
 기준 종류(ATTRIBUTE): 용도 / 연면적 / 층수 / 연도(경과연수·사용승인) / 기타(세대수·높이·바닥면적 등)
@@ -338,7 +339,7 @@ DOC_SOURCE = ("doc", "원문 정규식")
 
 
 def load_docs(docs_dir):
-    """의안 원문 글에서 server/lib/criteria.js 로 뽑은 규칙을 우리 AI 와 같은 꼴의 항목으로"""
+    """의안 원문의 개정 부분에서 server/lib/criteria.js 로 뽑은 규칙을 우리 AI 와 같은 꼴의 항목으로"""
     raw = subprocess.run(["node", os.path.join(ROOT, "server", "scripts", "compare-bill-docs.js"), "--rules", docs_dir],
                          capture_output=True, check=True).stdout
     out = {}
