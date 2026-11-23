@@ -103,7 +103,7 @@
             tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
             tileSize: 256,
             maxzoom: 19,
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보',
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> 기여자 · 건물: 브이월드 건물통합정보 · 건축물대장',
           },
         },
         layers: [{
