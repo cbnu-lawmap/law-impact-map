@@ -1,0 +1,174 @@
+{
+ "model": "klue/roberta-small",
+ "config": {
+  "max_len": 256,
+  "epochs": 5,
+  "lr": 3e-05,
+  "batch": 16,
+  "val_frac": 0.1,
+  "seed": 42,
+  "warmup_frac": 0.1,
+  "optimizer": "AdamW(weight_decay=0.01)",
+  "schedule": "linear warmup + linear decay",
+  "max_len_planned": 256,
+  "epochs_planned": 5,
+  "reduced": false,
+  "reduce_reason": "",
+  "time_budget_min": 30,
+  "best_epoch_rule": "val_acc 최대, 같으면 val_loss 최소",
+  "splits": "train_test_split(test_size=0.2, random_state=100+r, stratify=LABEL), r=0..9 (field_classifier 8절과 같음)",
+  "logreg_C": 100.0
+ },
+ "per_split": [
+  {
+   "split": 0,
+   "random_state": 100,
+   "ft_acc": 0.7666666666666667,
+   "lr_acc": 0.8333333333333334,
+   "rule_acc": 0.7,
+   "best_epoch": 4,
+   "train_seconds": 26.4
+  },
+  {
+   "split": 1,
+   "random_state": 101,
+   "ft_acc": 0.8,
+   "lr_acc": 0.7833333333333333,
+   "rule_acc": 0.6666666666666666,
+   "best_epoch": 5,
+   "train_seconds": 25.0
+  },
+  {
+   "split": 2,
+   "random_state": 102,
+   "ft_acc": 0.7666666666666667,
+   "lr_acc": 0.8333333333333334,
+   "rule_acc": 0.6833333333333333,
+   "best_epoch": 5,
+   "train_seconds": 25.6
+  },
+  {
+   "split": 3,
+   "random_state": 103,
+   "ft_acc": 0.8666666666666667,
+   "lr_acc": 0.8,
+   "rule_acc": 0.85,
+   "best_epoch": 5,
+   "train_seconds": 26.3
+  },
+  {
+   "split": 4,
+   "random_state": 104,
+   "ft_acc": 0.7333333333333333,
+   "lr_acc": 0.7166666666666667,
+   "rule_acc": 0.7666666666666667,
+   "best_epoch": 5,
+   "train_seconds": 27.4
+  },
+  {
+   "split": 5,
+   "random_state": 105,
+   "ft_acc": 0.7833333333333333,
+   "lr_acc": 0.8833333333333333,
+   "rule_acc": 0.8666666666666667,
+   "best_epoch": 3,
+   "train_seconds": 28.1
+  },
+  {
+   "split": 6,
+   "random_state": 106,
+   "ft_acc": 0.8,
+   "lr_acc": 0.8333333333333334,
+   "rule_acc": 0.8,
+   "best_epoch": 5,
+   "train_seconds": 27.6
+  },
+  {
+   "split": 7,
+   "random_state": 107,
+   "ft_acc": 0.8166666666666667,
+   "lr_acc": 0.85,
+   "rule_acc": 0.7333333333333333,
+   "best_epoch": 5,
+   "train_seconds": 27.9
+  },
+  {
+   "split": 8,
+   "random_state": 108,
+   "ft_acc": 0.7833333333333333,
+   "lr_acc": 0.7833333333333333,
+   "rule_acc": 0.7166666666666667,
+   "best_epoch": 5,
+   "train_seconds": 28.0
+  },
+  {
+   "split": 9,
+   "random_state": 109,
+   "ft_acc": 0.8166666666666667,
+   "lr_acc": 0.7666666666666667,
+   "rule_acc": 0.7833333333333333,
+   "best_epoch": 3,
+   "train_seconds": 27.9
+  }
+ ],
+ "ft_mean": 0.7933,
+ "ft_std": 0.0362,
+ "lr_mean": 0.8083,
+ "lr_std": 0.048,
+ "rule_mean": 0.7567,
+ "rule_std": 0.0686,
+ "nn_mean": 0.7883,
+ "nn_std": 0.0431,
+ "nn_source": "web/data/models/field_classifier.json metrics.cv_mean_nn / cv_std_nn",
+ "paired_diff_mean": -0.015,
+ "paired_diff_std": 0.0541,
+ "diff_exceeds_std": false,
+ "total_train_seconds": 270.2,
+ "logreg_train_seconds": 9.87,
+ "params": 68097801,
+ "logreg_params": 27009,
+ "device": "cuda",
+ "gpu_name": "Tesla T4",
+ "torch_version": "2.14.1+cu130",
+ "transformers_version": "5.22.1",
+ "run_date": "2026-11-24",
+ "n_labels": 298,
+ "wrong_examples": [
+  {
+   "split": 0,
+   "bill_no": "2215187",
+   "bill_name": "건축법 일부개정법률안",
+   "true": 9,
+   "true_name": "건설산업·기술·기타",
+   "pred": 7,
+   "pred_name": "도시계획·건축규제",
+   "logreg_pred": 7,
+   "ambig": "N",
+   "summary_head": "현행법은 소규모 건축물로서 건축주가 직접 시공하는 건축물 및 주택으로 사용하는 일부 건축물의 경우에는 부실공사 방지 등을 위해 허가권자가 해당 건축물의 설계에 참여하지 아니한 자 중에서 공사감리자를 지정하도록 하고 "
+  },
+  {
+   "split": 0,
+   "bill_no": "2215817",
+   "bill_name": "주택법 일부개정법률안",
+   "true": 9,
+   "true_name": "건설산업·기술·기타",
+   "pred": 4,
+   "pred_name": "주택 공급·임대·금융",
+   "logreg_pred": 4,
+   "ambig": "N",
+   "summary_head": "현행법은 등록사업자가 이 법에 따른 의무 등을 위반한 경우에는 주택건설사업의 등록을 말소하거나 6개월 이내의 기간을 정하여 영업의 정지를 명할 수 있다고 규정하면서 그 세부적인 처분 기준은 위반 사유와 정도를 고려하"
+  },
+  {
+   "split": 0,
+   "bill_no": "2203638",
+   "bill_name": "빈집 및 소규모주택 정비에 관한 특례법 일부개정법률안",
+   "true": 6,
+   "true_name": "정비사업·도시재생",
+   "pred": 4,
+   "pred_name": "주택 공급·임대·금융",
+   "logreg_pred": 6,
+   "ambig": "N",
+   "summary_head": "현재 서울시에는 노후 저층 주거지를 대상으로 하는 모아타운(소규모 정비) 사업이 적극적으로 추진되고 있으며, 모아타운 사업의 경우 신속한 사업 추진 및 용적률 완화 등 혜택이 제공됨에도 세입자들에 대한 주거？및？이주"
+  }
+ ]
+}
