@@ -1,5 +1,5 @@
 # 학습 노트북 실행 (Colab 과 비슷한 리눅스 + 파이썬 3.12 + TensorFlow)
-# main 이 아닌 브랜치에 notebooks/ 를 올리면 노트북을 처음부터 끝까지 실행하고,
+# main 이 아닌 브랜치에 notebooks/ 를 올리면 노트북을 처음부터 끝까지 실행하고 (field_finetune.ipynb 는 GPU 가 필요해 건너뜀),
 # 실행 결과(그래프·숫자)가 남은 노트북과 노트북이 만든 파일(모델·예측)을 같은 브랜치에 커밋한다.
 # 데이터는 노트북 안에서 GitHub raw(main)에서 읽고, 없으면 저장소의 data/ 를 읽는다.
 name: Run notebooks
@@ -38,6 +38,8 @@ jobs:
         run: |
           cd notebooks
           for nb in *.ipynb; do
+            # 파인튜닝 노트북은 GPU(Colab T4)에서 손으로 실행하고 결과를 커밋한다. CPU 인 Actions 에서는 돌리지 않는다
+            if [ "$nb" = "field_finetune.ipynb" ]; then echo "== $nb 건너뜀 (Colab GPU 에서 실행)"; continue; fi
             echo "== $nb"
             jupyter nbconvert --to notebook --execute --inplace --ExecutePreprocessor.timeout=3600 "$nb"
           done
