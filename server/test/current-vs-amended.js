@@ -176,8 +176,9 @@ async function withWrongModel(no, fn) {
     assert.strictEqual(r.code, 200, JSON.stringify(r.body));
     const j = r.body;
     const sum = j.extraction.by_source.find((x) => x.source === "summary");
-    assert.strictEqual(sum.method, "AI");
-    assert.strictEqual(sum.rule.세대수, undefined, JSON.stringify(sum.rule));
+    assert.ok(sum.method.startsWith("규칙"), sum.method); // 규칙 우선 (정규식 + 빈 속성만 AI)
+    // 규칙 우선이라 정규식이 개정 문장의 30세대를 잡을 수 있음. 현행 300세대만 규칙에 들어가지 않으면 됨
+    assert.ok(!sum.rule.세대수 || (sum.rule.세대수.min !== 300 && sum.rule.세대수.max !== 300), JSON.stringify(sum.rule));
     assert.ok(sum.dropped.some((d) => d.why === Criteria.WHY_CURRENT));
     assert.deepStrictEqual(j.extraction.current.세대수.value, { min: 300, max: 300 });
     assert.ok(/현행 300세대 이상/.test(j.extraction.current_line), j.extraction.current_line);

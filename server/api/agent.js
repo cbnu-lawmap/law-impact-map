@@ -411,7 +411,7 @@ async function run(D, no, note, llm) {
         const r = await llm.complete(EXTRACT_PROMPT, "[요약]\n" + fullText, CALL_MAX_TOKENS, true);
         state.tokens += r.tokens;
         const items = JSON.parse(r.text).items;
-        if (Array.isArray(items)) { cands = items; how = "AI"; }
+        if (Array.isArray(items)) { const m = Criteria.preferRule(cands, items, fullText); cands = m.cands; how = m.added ? "규칙+AI 보완" : "규칙"; }
       } catch (e) { /* 실패하면 정규식 결과를 쓴다 */ }
     }
     const v = Criteria.verify(cands, fullText);

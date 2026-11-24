@@ -458,6 +458,20 @@ function extractFromDoc(raw) {
   return { text, rule: r.rule, evidence: r.evidence, dropped: dropped0.concat(r.dropped) };
 }
 
-module.exports = { KIND_AMEND, KIND_CURRENT, KIND_STAT, KIND_OTHER, WHY_CURRENT, WHY_STAT, WHY_OTHER, classifySentences, currentTexts,
+/**
+ * 규칙 우선 합치기: 정규식 후보 중 원문 대조를 통과한 기준(속성)은 그대로 두고,
+ * 정규식이 못 찾은 속성만 AI 후보로 채운다. 시범 27건 3회 반복 측정(2026-11-24)에서
+ * 정규식만 12건, AI(Agentic RAG) 평균 6건이 시범 규칙과 일치해 규칙을 기본으로 둔다.
+ * 반환: { cands, added } (added = AI 에서 더한 후보 수)
+ */
+function preferRule(regexCands, aiCands, text) {
+  const base = Array.isArray(regexCands) ? regexCands : [];
+  if (!Array.isArray(aiCands) || !aiCands.length) return { cands: base, added: 0 };
+  const have = new Set(verify(base, text).evidence.map((e) => e.attr));
+  const extra = aiCands.filter((c) => c && c.attr && !have.has(c.attr));
+  return { cands: base.concat(extra), added: extra.length };
+}
+
+module.exports = { preferRule, KIND_AMEND, KIND_CURRENT, KIND_STAT, KIND_OTHER, WHY_CURRENT, WHY_STAT, WHY_OTHER, classifySentences, currentTexts,
   NUM_ATTRS, NOT_IN_QUOTE, DELEG_NO_PHRASE, DELEG_LONG_VALUE, useTermIn, findDelegation, REF_DATE, normText, numberForms, numberInText, extractCandidates, verify, extract, ruleTexts,
   prepDocText, amendedText, extractFromDoc };

@@ -272,6 +272,8 @@ AI 기능은 `server/`를 Vercel 프로젝트 `ppaegok-api`로 따로 배포해 
 
 2026-11-23 배포 서버(gpt-4o-mini)에서 시범 27건 × 3방식을 `node server/scripts/compare-rag.js` 로 잰 값입니다 (법안별 결과 `data/rag_compare.csv`). agent 1건(2220379)은 네트워크 오류로 실패해 26건 평균입니다. 모델 출력은 실행마다 조금 달라질 수 있습니다. 시범 규칙 일치 수는 사람이 고른 시범 규칙과 똑같은 법안 수라 정답률이 아닙니다. 재검색으로 살린 법안 5건 (요약에서 부족 → 법안 원문 개정 조문에서 판정에 충분): 2220631 연면적, 2208341 용도, 2200958 용도, 2217767 용도, 2204049 용도.
 
+**3회 반복 측정 (2026-11-24)**: 같은 27건을 다시 세 번 재면 시범 규칙 일치는 rag1 5·6·4건, agentic 6·6·6건이고, AI 없이 정규식 규칙만 쓰면 12건이었습니다. 그래서 기준 뽑기를 **규칙 우선**(정규식이 원문 대조를 통과한 속성은 유지, 빈 속성만 AI로 채움)으로 바꿨습니다. 자세한 표와 법안별 결과는 [docs/agentic_rag.md](docs/agentic_rag.md)와 `data/rag_repeat3.csv`.
+
 **로컬 모델로 바꾸기**: 검토 에이전트는 환경변수만으로 OpenAI 호환 서버(Ollama·vLLM 등)를 쓸 수 있습니다. `AGENT_LLM_BASE_URL`(예: `http://내부서버:11434/v1`), `AGENT_LLM_MODEL`(예: `qwen2.5:1.5b-instruct`, 없으면 `OPENAI_MODEL` 또는 `gpt-4o-mini`), `AGENT_LLM_KEY`(그 서버에 키가 있을 때만)를 주면 모든 모델 호출이 그 주소의 `/chat/completions`로 가고 OpenAI 키는 보내지 않습니다. 셋 다 비우면 지금처럼 OpenAI를 씁니다. 예: Ollama 서버에서 `ollama pull qwen2.5:1.5b-instruct` 뒤 `AGENT_LLM_BASE_URL=http://localhost:11434/v1 AGENT_LLM_MODEL=qwen2.5:1.5b-instruct npm run dev`. 어떤 모델이든 원문 대조를 통과한 기준만 판정에 쓰이고, 응답의 `extraction`(방법·후보 수·통과 수·버린 이유)으로 모델별 추출 결과를 비교할 수 있습니다. 질의 도우미(`ask.js`)는 OpenAI 그대로입니다.
 
 두 기능 모두 공개 법안 자료와 질문만 OpenAI로 보내며, 개인정보가 든 질문과 개별 건물 판정 질문은 서버에서 고정 문구로 거절합니다. 결과에는 항상 「사람 확인 필요」가 붙습니다.
