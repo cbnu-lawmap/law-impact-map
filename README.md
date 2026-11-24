@@ -170,6 +170,7 @@ law-impact-map/
 | 10주차 | 전염병 예측 (RNN, 시계열) | 발의량 예측: 10주차와 같은 순서(정규화 → 과거 n주 입력 → SimpleRNN + Dense(1) → RMSE → 실제·예측 그래프) |
 | 12주차 | 생성형 AI와 로컬 LLM | 로컬 LLM 비교 노트북, 에이전트 모델 공급자 환경변수(`AGENT_LLM_BASE_URL`) |
 | 13주차 | 검색 증강 생성(RAG) | 질의 도우미(`server/api/ask.js`): 질문과 관련된 법안을 먼저 찾고 그 내용만 근거로 답을 생성. 검토 에이전트의 1회 RAG·Agentic RAG 방식 비교 ([설계](docs/agentic_rag.md)) |
+| 14주차 | 파인튜닝(미세조정) | 사전학습 한국어 모델 `klue/roberta-small` 을 법안 분야 분류에 파인튜닝해, 분야 분류 노트북과 같은 분할 10번에서 로지스틱 회귀·Dense 신경망과 비교 ([노트북](notebooks/field_finetune.ipynb)). 결과: 0.793 ± 0.036 으로 로지스틱 회귀(0.808)를 넘지 못함. 화면 모델은 바꾸지 않고 비교만 기록 |
 
 팀이 직접 학습한 모델 네 개가 중심입니다. 분야 분류·통과 예측·건물 빈칸 추정은 Keras `Sequential` + `Dense`, 발의량 예측은 10주차와 같은 `SimpleRNN` 구조이고, 노트북은 Colab에서 처음부터 끝까지 그대로 실행됩니다(데이터는 GitHub raw에서 읽음). 저장소에 올린 노트북에는 실행 결과(그래프·숫자)가 남아 있습니다.
 
@@ -179,13 +180,14 @@ law-impact-map/
 | 1·3·4·9주차 | [통과 예측](notebooks/pass_prediction.ipynb) | 법안 내용이 법에 반영될까 (가결·대안반영) | 21대 국회 같은 범위 처리 확정 1,087건 + 공동발의·제안일 위원회 소속(제안 시점 정보) | 다수 클래스 정확도 0.642, 로지스틱 회귀 AUC 0.722 | Dense 16 → Sigmoid, **AUC 0.718**, F1 0.56 (시간 분리 AUC 0.662, 공동발의 정보 넣기 전 0.625) | 행정 화면 법안 상세·목록 "통과 가능성 높음/보통/낮음" (시간 분리 시험에서 정한 구간, 구간별 실제 반영률 5% / 10% / 22%), 에이전트 `predict_pass` | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/pass_prediction.ipynb) |
 | 1·3·4·9주차 | [건물 빈칸 추정](notebooks/building_imputation.ipynb) | 판정불가 원인 속성이 빈 건물의 연면적(4구간)·사용승인 연대(4구간)·지상층수(5구간) | 사창동에서 그 속성이 있는 건물 (연면적 2,123동, 사용승인 2,129동, 층수 2,119동, 건축물대장 표제부 대장 값 우선 반영) | 로지스틱 회귀 연면적 0.694·층수 0.538, 이웃 8동 다수결 사용승인 0.610 | 대상마다 Dense 64-32 → Softmax, 연면적 **0.725**, 사용승인 연대 **0.554** (이웃 다수결 0.610 보다 낮아 화면에는 이웃 다수결을 씀), 지상층수 **0.564** | 지도 건물 카드 "추정 연면적·사용승인 연대·지상층수 (참고용 · 판정에 쓰지 않음)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/building_imputation.ipynb) |
 | 10주차 | [발의량 예측](notebooks/bill_volume_rnn.ipynb) | 다음 주 국토교통위원회 의원 발의 법안 수 | 21·22대 의원 발의 주별 발의량 338주 | 지난주 값, 4주 이동평균 (RMSE) | 10주차 실습과 같은 SimpleRNN(3) → Dense(1), MinMaxScaler, 과거 n주 입력 (n 4·8·12 실험, LSTM 비교) | 행정 화면 상황판 "다음 주 예상 발의량 (예측·참고용)" | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/bill_volume_rnn.ipynb) |
+| 14주차 | [분야 분류 파인튜닝](notebooks/field_finetune.ipynb) | 법안 제안이유 → 9개 분야 (분야 분류와 같은 문제) | 분야 분류와 같은 라벨 298건, 같은 분할 10번 | 로지스틱 회귀·규칙 기반(같은 분할에서 다시 잼), Dense 신경망(분야 분류 노트북 값) | 사전학습 `klue/roberta-small` 파인튜닝 (AdamW, 선형 워밍업, 가장 좋은 검증 epoch). 분할 10번 정확도 **0.793 ± 0.036** (로지스틱 회귀 0.808 ± 0.048, Dense 0.788 ± 0.043, 규칙 0.757 ± 0.069). 같은 분할끼리 뺀 차이 -0.015 ± 0.054 로 로지스틱 회귀보다 낮고 차이는 표준편차보다 작음. T4 학습 4.5분, 파라미터 6,810만 개 | 화면에 쓰지 않음 (비교 기록만, `data/finetune_compare.json`). Colab GPU(T4)에서 실행 | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/field_finetune.ipynb) |
 
 - 노트북마다 같은 순서입니다: 문제 → 데이터 → 전처리 → 학습/테스트 분리 → 기준선 → 신경망 → 과적합 확인 → 은닉층 실험 → 오답 분석 → 결과표 → 화면에 쓰이는 곳.
 - **화면에는 검증에서 더 잘 맞는 방법을 씁니다.** 분야 분류는 로지스틱 회귀, 사용승인 연대 추정은 이웃 8동 다수결, 나머지는 신경망입니다. 신경망과의 비교는 노트북에 그대로 남깁니다.
 - 세 모델 모두 같은 특징의 로지스틱 회귀와 차이가 흔들림 범위 안입니다. 데이터가 적어 은닉층이 주는 이득이 작다는 것도 결과로 적었습니다. 분야 분류는 노트북이 10회 평균 정확도가 높은 쪽(지금은 로지스틱 회귀)을 골라 화면에 내보냅니다. 같은 형식(은닉층 없는 Dense 한 층 + Softmax)이라 서버 계산은 그대로입니다.
 - 숫자는 시드를 고정해도 실행하는 CPU 종류에 따라 셋째 자리가 조금 달라질 수 있습니다. 노트북의 결과표는 실행한 숫자로 코드가 만듭니다.
 - 학습한 가중치는 `web/data/models/`로 내보내고, 서버(`server/lib/nn.js`)가 TensorFlow 없이 같은 계산을 합니다. `node server/test/nn.js`가 노트북 예측(Keras 또는 로지스틱 회귀 `predict_proba`)과 서버 계산이 같은지 확인합니다.
-- 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다.
+- 노트북을 고쳐 main이 아닌 브랜치에 올리면 GitHub Actions(`run-notebooks.yml`)가 리눅스 + 파이썬 3.12 + TensorFlow로 다시 실행하고 결과를 커밋합니다. 파인튜닝 노트북(`field_finetune.ipynb`)은 GPU가 필요해 Actions에서 건너뛰고, Colab GPU에서 실행한 결과를 커밋합니다.
 - 통과 예측 학습 데이터는 `collect-history.yml`(수동 실행)이 열린국회 API에서 모은 `data/bills_history_21.csv`입니다. 의원 이름·정당은 쓰지 않습니다. 공동발의 인원과 제안일에 소관 위원회 위원이었는지(숫자·0/1)는 `collect-process.yml`이 모은 `data/bills_process_21.csv`·`_22.csv`에서 가져옵니다. 위원회 상정처럼 제안 뒤에 생기는 정보는 노트북에서 비교만 하고 화면에는 쓰지 않습니다.
 
 ### 로컬 LLM 비교 ([notebooks/local_llm_extraction.ipynb](notebooks/local_llm_extraction.ipynb)) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cbnu-lawmap/law-impact-map/blob/main/notebooks/local_llm_extraction.ipynb)
