@@ -49,6 +49,7 @@ jobs:
       - name: Tests
         run: |
           python tests/test_judge.py
+          python tests/test_criteria_wait.py
           python collect/test_collect_register.py
           python collect/test_crosscheck.py
           python collect/test_http_retry.py

@@ -122,6 +122,16 @@
   function fieldName(f) { return f == null ? "미분류" : D.fields[f] || "미분류"; }
   // 자동 분류는 숫자(확신도)를 보이지 않고, 낮을 때만 "분류 확인 필요"를 붙인다
   function lowConf(b) { return b.conf != null && b.conf < CONF_LOW; }
+  // 판정 전 법안을 둘로 나눈다. has_criteria 는 collect/build_web_data.py 가 규칙 기반·팀원 AI 추출·기준 교차 확인 중
+  // 한 곳에라도 건물 기준 후보(용도·면적·층수·연도·위임)가 있는 법안에만 붙인다.
+  //   "done" 판정함 / "crit" 기준 확인 대기 (후보 있음, 아직 판정 전) / "none" 건물 기준 없음 (절차·금융 등)
+  function waitKind(b) { return D.demos[b.no] ? "done" : b.has_criteria ? "crit" : "none"; }
+  var WAIT_LABEL = { crit: "기준 확인 대기", none: "건물 기준 없음" };
+  function waitTag(b) {
+    var k = waitKind(b);
+    return '<span class="tag wait' + (k === "crit" ? " crit" : "") + '"' + (k === "none" ? ' title="절차·금융 등 건물 기준이 없는 법안 (자동 판단)"' : "") +
+      ">" + WAIT_LABEL[k] + "</span>";
+  }
   function fieldTag(b) {
     return '<span class="tag" title="법안 내용으로 자동 분류한 분야">' + esc(fieldName(b.field)) + ' <span class="sub">자동 분류</span></span>' +
       (lowConf(b) ? ' <span class="tag check" title="자동 분류가 불확실합니다. 분야를 직접 확인하세요">분류 확인 필요</span>' : "");
@@ -322,13 +332,16 @@
       if (h > hitMax) hitMax = h;
     });
     var judgedDone = judgedNos.filter(function (no) { return pgOf(no) === "done"; }).length;
+    var waitCnt = { done: 0, crit: 0, none: 0 };
+    D.bills.forEach(function (b) { waitCnt[waitKind(b)]++; });
     var role = prefs.role || "review";
     var cards = {
       review: [
         kpi("지금 검토할 법안", fmt(judgedNos.length - judgedDone) + "건", "판정했고 아직 검토 완료 전"),
         kpi("검토 중", fmt(cnt.doing) + "건", "보류 " + fmt(cnt.hold) + "건"),
         kpi("사창동에 영향 있는 법안", fmt(hitBills) + "건", "대상·경계선 1동 이상 · 최대 " + fmt(hitMax) + "동"),
-        kpi("기준 추출 대기", fmt(D.bills.length - judgedNos.length) + "건", "AI 기준 추출 단계에서 판정 예정", true),
+        kpi("기준 확인 대기", fmt(waitCnt.crit) + "건", "건물 기준 후보가 있고 아직 판정 전", true),
+        kpi("건물 기준 없음", fmt(waitCnt.none) + "건", "절차·금융 등, 자동 판단"),
       ],
       approve: [
         kpi("결재 대기 (검토 완료)", fmt(cnt.done) + "건", "검토서 인쇄·한글 내려받기 가능", cnt.done > 0),
@@ -347,7 +360,7 @@
     var html = '<p class="eyebrow">' + esc(ROLES[role].label) + ' 화면</p><h2>상황판</h2><p class="lead">' + esc(D.region) +
       " 기준 · 국회 계류 법안이 우리 동네 건물에 미치는 영향</p>";
     html += headline(judgedNos, judgedDone);
-    html += '<div class="kpis" id="kpis">' + cards.join("") + "</div>";
+    html += '<div class="kpis' + (cards.length === 5 ? " five" : "") + '" id="kpis">' + cards.join("") + "</div>";
     html += newBillsCard();
     html += nearPassCard();
     html += passTierSummary();
@@ -485,7 +498,7 @@
     } else {
       html += '<table class="dt"><tbody>' + near.slice(0, 5).map(function (b) {
         var d = D.demos[b.no];
-        var hit = d ? '<span class="tag done">대상·경계선 ' + fmt(d.counts.대상 + d.counts.경계선) + "동</span>" : '<span class="tag wait">기준 추출 대기</span>';
+        var hit = d ? '<span class="tag done">대상·경계선 ' + fmt(d.counts.대상 + d.counts.경계선) + "동</span>" : waitTag(b);
         return '<tr><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + '</a><div class="muted small">의안 ' + esc(b.no) + " · " + esc(b.committee) +
           "</div></td><td>" + stageTag(b, true) + "</td><td>" + hit + "</td><td>" + passCell(b) + "</td></tr>";
       }).join("") + "</tbody></table>" +
@@ -554,6 +567,7 @@
       if (s.committee && b.committee !== s.committee) return false;
       if (s.status === "done" && !D.demos[b.no]) return false;
       if (s.status === "wait" && D.demos[b.no]) return false;
+      if ((s.status === "crit" || s.status === "none") && waitKind(b) !== s.status) return false;
       if (s.pg && pgOf(b.no) !== s.pg) return false;
       if (s.stage === "near" && !Judge.isNearPass(b)) return false;
       if (s.stage === "open" && b.in_progress !== true) return false;
@@ -603,7 +617,11 @@
         return "<option" + (s.committee === c ? " selected" : "") + ">" + esc(c) + "</option>";
       }).join("") + "</select>" +
       '<select id="f-status"><option value="">판정 전체</option><option value="done"' + (s.status === "done" ? " selected" : "") +
-      '>판정한 법안</option><option value="wait"' + (s.status === "wait" ? " selected" : "") + ">기준 추출 대기</option></select>" +
+      '>판정한 법안</option><option value="wait"' + (s.status === "wait" ? " selected" : "") + ">판정 전 전체</option>" +
+      ["crit", "none"].map(function (k) {
+        var n = D.bills.filter(function (b) { return waitKind(b) === k; }).length;
+        return '<option value="' + k + '"' + (s.status === k ? " selected" : "") + ">" + WAIT_LABEL[k] + " (" + fmt(n) + ")</option>";
+      }).join("") + "</select>" +
       '<select id="f-pg"><option value="">진행 전체</option>' + PG_KEYS.map(function (k) {
         return '<option value="' + k + '"' + (s.pg === k ? " selected" : "") + ">" + PG[k].label + "</option>";
       }).join("") + "</select>" +
@@ -632,7 +650,7 @@
         ["의안번호", "법안명", "소관위원회", "제안일", "심사 단계", "단계 날짜", "분야(자동 분류)", "분류 확인", "판정", "대상", "경계선", "비대상", "판정불가", "통과 가능성(신경망 추정)", "통과 확률(신경망 추정)", "진행", "의안정보시스템"],
         filteredBills().map(function (b) {
           var d = D.demos[b.no];
-          return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : "기준 추출 대기"]
+          return [b.no, b.name, b.committee, b.date, b.stage || "", b.stage_date || "", fieldName(b.field), lowConf(b) ? "확인 필요" : "", d ? "판정함" : WAIT_LABEL[waitKind(b)]]
             .concat(d ? STATUSES.map(function (st) { return d.counts[st]; }) : ["", "", "", ""])
             .concat([passPct(b), b.pass_prob == null ? "" : b.pass_prob, PG[pgOf(b.no)].label, b.link]);
         }));
@@ -677,7 +695,7 @@
       var impact = d
         ? '<span class="tag done">판정함</span> <span class="small">대상 ' + fmt(d.counts.대상) + " · 경계선 " + fmt(d.counts.경계선) +
           " · 판정불가 " + fmt(d.counts.판정불가) + "</span>"
-        : '<span class="tag wait">기준 추출 대기</span>';
+        : waitTag(b);
       return '<tr><td class="chk no-print"><input type="checkbox" data-sel="' + b.no + '"' + (s.sel[b.no] ? " checked" : "") + "></td><td>" +
         esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) + "</a></td><td>" + esc(b.committee) +
         '</td><td class="num">' + esc(b.date) + "</td><td>" + stageTag(b, true) + "</td><td>" + esc(fieldName(b.field)) +
@@ -840,8 +858,10 @@
 
     if (!demo) {
       $view.innerHTML = billHead(b) + links + agentBox(no) + progressBox(no) +
-        '<div class="note-box">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않아 건물 판정이 없습니다. ' +
-        "AI 기준 추출 단계에서 판정할 예정입니다.</div>" +
+        '<div class="note-box">' + (waitKind(b) === "crit"
+          ? "기준 확인 대기: 규칙 기반이나 AI 추출에서 건물 기준 후보(용도·면적·층수·연도)가 나왔지만 아직 확인하지 않아 건물 판정이 없습니다. 아래 기준 교차 확인을 보고 판정할 수 있습니다."
+          : "건물 기준 없음: 규칙 기반·AI 추출 어디에서도 건물 기준 후보가 나오지 않았습니다. 절차·금융 등 건물에 직접 걸리지 않는 법안으로 자동 판단해 건물 판정을 하지 않습니다.") +
+        "</div>" +
         '<h3>제안이유·주요내용 (요약)</h3><div class="card">' + esc(b.summary) + "</div>" +
         '<div id="xc-box"></div><div id="similar-box"></div>';
       bindProgressBox(no, rerender);
@@ -1108,7 +1128,7 @@
       (active.map(function (b) {
         var p = progress[b.no] || {}, d = D.demos[b.no];
         return "<tr><td>" + pgMark(b.no) + "</td><td>" + esc(b.no) + '</td><td class="title"><a href="#/bill/' + b.no + '">' + esc(b.name) +
-          "</a></td><td class=\"small\">" + (d ? "대상 " + fmt(d.counts.대상) + " · 경계선 " + fmt(d.counts.경계선) + " · 판정불가 " + fmt(d.counts.판정불가) : "기준 추출 대기") +
+          "</a></td><td class=\"small\">" + (d ? "대상 " + fmt(d.counts.대상) + " · 경계선 " + fmt(d.counts.경계선) + " · 판정불가 " + fmt(d.counts.판정불가) : WAIT_LABEL[waitKind(b)]) +
           '</td><td class="small">' + esc(p.memo || "") + '</td><td class="small muted">' + when(p.t) + Cloud.whoCell(b.no) + "</td></tr>";
       }).join("") || '<tr><td colspan="6" class="muted">아직 기록이 없습니다. 법안 상세에서 진행 상태를 바꾸거나, 목록에서 여러 건을 체크해 한꺼번에 바꿀 수 있습니다.</td></tr>') +
       "</tbody></table></div>";
