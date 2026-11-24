@@ -139,7 +139,7 @@ function makeCtx(o) {
         const r = await llm.complete(o.EXTRACT_PROMPT, "[" + S.SOURCE_KO[source] + "]\n" + text.slice(0, 3500), limits.CALL_MAX_TOKENS, true);
         st.tokens += r.tokens;
         const items = JSON.parse(r.text).items;
-        if (Array.isArray(items)) { cands = items; how = "AI"; }
+        if (Array.isArray(items)) { const m = Criteria.preferRule(cands, items, text); cands = m.cands; how = m.added ? "규칙+AI 보완" : "규칙"; }
       } catch (e) { /* 실패하면 정규식 결과 */ }
     }
     return { cands, how };
@@ -321,7 +321,7 @@ async function runRag1(o) {
         const x = await o.llm.complete(o.EXTRACT_PROMPT, "[요약]\n" + r.text.slice(0, 3500), o.limits.CALL_MAX_TOKENS, true);
         st.tokens += x.tokens;
         const items = JSON.parse(x.text).items;
-        if (Array.isArray(items)) { cands = items; how = "AI"; }
+        if (Array.isArray(items)) { const m = Criteria.preferRule(cands, items, r.text); cands = m.cands; how = m.added ? "규칙+AI 보완" : "규칙"; }
       } catch (e) { /* 정규식 */ }
     }
     ev = Object.assign(S.evaluateSource("summary", r.text, cands), { source: "summary", found: true });

@@ -104,11 +104,11 @@ test("env 있음: 에이전트 호출이 로컬 주소로 가고, 확인용 extr
     assert.ok(calls.some((c) => c.body.response_format && c.body.response_format.type === "json_object"), "기준 뽑기 호출 없음");
     const ex = r.body.extraction;
     assert.ok(ex, "extraction 없음");
-    assert.strictEqual(ex.method, "AI");
+    // 규칙 우선: 정규식이 원문 대조를 통과한 층수(2층 이하)가 있어 모델이 지어낸 층수 후보는 더하지 않음
+    assert.strictEqual(ex.method, "규칙");
     assert.strictEqual(ex.model, "qwen2.5:1.5b-instruct");
-    assert.strictEqual(ex.candidates_n, 1);
-    assert.strictEqual(ex.passed, 0);
-    assert.deepStrictEqual(ex.dropped, [{ attr: "층수", why: "근거 문구가 요약 원문에 그대로 없음" }]);
+    assert.ok(ex.passed >= 1, JSON.stringify(ex));
+    assert.ok(!ex.dropped.some((d) => d.why === "근거 문구가 요약 원문에 그대로 없음"), JSON.stringify(ex.dropped));
   } finally {
     global.fetch = realFetch;
     ["AGENT_LLM_BASE_URL", "AGENT_LLM_MODEL", "OPENAI_API_KEY"].forEach((k) => delete process.env[k]);
