@@ -10,6 +10,7 @@
                               est_year·est_year_p (사용승인 연대), est_flr·est_p (지상층수). 추정은 참고용, 판정에 안 씀
   web/data/boundary.geojson   사창동 행정동 경계
   web/data/bills.json         법안 목록 (bills_summary + bills_field_pred + bills_stage + bills_pass_pred, BILL_NO 기준)
+                              건물 기준 후보가 있는 법안은 has_criteria: true (criteria_bill_sets 참고)
   web/data/demo_rules.json    판정 시범(사람 추출 2건 + AI 추출·원문 대조) 규칙과 결과 동수
 
 개인정보 보호: 건물명(bld_nm), 동명(dong_nm) 등 이름이 섞일 수 있는 필드는 넣지 않는다.
@@ -557,6 +558,40 @@ def mark_added(bills):
     print(f"  bills_seen.csv: 오늘 새로 들어온 법안 {sum(1 for b in bills if b.get('added') == today)}건")
 
 
+CRITERIA_TEAM_FIELDS = ("use", "area", "floors", "year", "delegated")
+
+
+def criteria_bill_sets():
+    """건물 기준 후보가 있는 법안 번호를 출처별로 모은다 (bills.json 의 has_criteria, 상황판 "기준 확인 대기").
+
+    셋 중 하나라도 해당하면 "기준 후보 있음"으로 본다. 파일이 없으면 그 출처는 빈 집합.
+      rule   data/criteria_rule.csv: 줄이 있는 법안 (속성 ATTRIBUTE 와 값 VALUE 가 비지 않은 줄만 센다.
+             지금 파일은 모든 줄이 둘 다 채워져 있음)
+      team   data/ai_feature_extraction.csv: use·area·floors·year·delegated 중 하나라도
+             "미기재"나 빈칸이 아닌 법안 (conditions·excluded 는 건물 기준이 아니라 설명이라 보지 않음)
+      cross  web/data/crosscheck.json: items 가 한 개 이상인 법안 (collect/crosscheck_criteria.py 가
+             판정 시범 규칙·rule·team 을 맞춰 본 결과라서 판정한 법안도 여기 들어 있다)
+    판정한 법안(demo_rules.json)은 따로 더하지 않는다. tests/test_criteria_wait.py 가 판정한 법안이
+    이 합집합 안에 있는지 본다 (빠지면 crosscheck_criteria.py 를 다시 돌려야 한다는 뜻).
+    """
+    sets = {"rule": set(), "team": set(), "cross": set()}
+    p = os.path.join(DATA, "criteria_rule.csv")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8-sig", newline="") as f:
+            sets["rule"] = {r["BILL_NO"] for r in csv.DictReader(f)
+                            if (r.get("ATTRIBUTE") or "").strip() and (r.get("VALUE") or "").strip()}
+    p = os.path.join(DATA, "ai_feature_extraction.csv")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8-sig", newline="") as f:
+            sets["team"] = {r["BILL_NO"] for r in csv.DictReader(f)
+                            if any((r.get(k) or "").strip() not in ("", "미기재") for k in CRITERIA_TEAM_FIELDS)}
+    p = os.path.join(OUT, "crosscheck.json")
+    if os.path.exists(p):
+        with open(p, encoding="utf-8") as f:
+            sets["cross"] = {no for no, v in json.load(f).get("bills", {}).items() if v.get("items")}
+    return sets
+
+
 def main():
     os.makedirs(OUT, exist_ok=True)
     print("web/data 생성")
@@ -637,6 +672,14 @@ def main():
             })
             if r["BILL_NO"] in pass_pred:
                 bills[-1]["pass_prob"] = pass_pred[r["BILL_NO"]]
+    # 건물 기준 후보가 있는 법안만 has_criteria: true (pass_prob·added 처럼 해당할 때만 넣는다)
+    crit_sets = criteria_bill_sets()
+    crit = set().union(*crit_sets.values())
+    for b in bills:
+        if b["no"] in crit:
+            b["has_criteria"] = True
+    print("  건물 기준 후보:", ", ".join(f"{k} {len(v)}건" for k, v in crit_sets.items()),
+          f"→ 합집합 {sum(1 for b in bills if b.get('has_criteria'))}건 / {len(bills)}건")
     bills.sort(key=lambda b: (b["date"], b["no"]), reverse=True)
     mark_added(bills)
     print("  심사 단계:", dict(Counter(b["stage"] for b in bills)))
