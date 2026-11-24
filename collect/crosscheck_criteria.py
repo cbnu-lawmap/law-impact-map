@@ -4,7 +4,7 @@
 
   A. 우리 AI 추출   web/data/demo_rules.json (판정 시범 26건, build_web_data.py 의 DEMO_RULES·AI_RULES)
   B. 규칙 기반      data/criteria_rule.csv (extract_criteria.py, PR #18)
-  C. 팀원 AI 추출   data/ai_feature_extraction.csv (PR #20, 머지 전)
+  C. 팀원 AI 추출   data/ai_feature_extraction.csv (PR #20)
                     파일이 없으면 git show origin/feature/ai-feature-extraction:data/ai_feature_extraction.csv 로 읽는다
   D. 원문 정규식    (--docs 를 줄 때만) data/bill_docs/<의안번호>_원문.txt 의 개정 부분(개정문 안의 새 글만.
                     제안이유·정의 조문·부칙·대비표 제외)에 server/lib/criteria.js 의 뽑기를 돌린 것
