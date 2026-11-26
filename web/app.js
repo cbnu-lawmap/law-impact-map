@@ -34,6 +34,8 @@
     selected: null,
     buildings: null,   // 지도용 FeatureCollection (_i, _h, _color)
     props: [],
+    badges: /[?&]rank=1(&|$)/.test(location.search), // 현장 점검 순번 배지 (행정 화면 "지도에서 순번 보기"는 ?rank=1)
+    badgeList: [],     // 배지를 붙일 점검 목록 상위 건물 [{rank, idx}]
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -154,6 +156,7 @@
           function (i) { return state.buildings.features[i].properties._color; },
           function (i) { return state.buildings.features[i].properties._h; });
         renderLegend();
+        drawBadges();
       }).catch(function (err) {
         console.warn("브이월드 3D 지도를 쓰지 못해 기본 3D 지도로 표시합니다:", err.message);
         vmap = null;
@@ -168,7 +171,34 @@
     engine = "basic";
     renderLegend();
     renderEngineToggle();
-    return loadMapLibre().then(createBasicMap).then(function () { addLayers(bnd); });
+    return loadMapLibre().then(createBasicMap).then(function () { addLayers(bnd); drawBadges(); });
+  }
+
+  // ---------------------------------------------------------------- 현장 점검 순번 배지
+  // 건물 바닥면 첫 고리의 꼭짓점 평균 (작은 건물이라 무게중심 대신 써도 충분)
+  function centerOf(geom) {
+    var ring = geom.type === "MultiPolygon" ? geom.coordinates[0][0] : geom.coordinates[0];
+    var n = ring.length > 1 ? ring.length - 1 : ring.length, x = 0, y = 0;
+    for (var k = 0; k < n; k++) { x += ring[k][0]; y += ring[k][1]; }
+    return [x / n, y / n];
+  }
+  var badgeMarkers = [];
+  function drawBadges() {
+    var list = state.badges && currentDemo() ? state.badgeList : [];
+    var items = list.map(function (r) {
+      var f = state.buildings.features[r.idx], c = centerOf(f.geometry);
+      return { lon: c[0], lat: c[1], h: f.properties._h, text: r.rank };
+    });
+    if (engine === "vworld" && vmap && vmap.setBadges) { vmap.setBadges(items); return; }
+    if (!map || !window.maplibregl) return;
+    badgeMarkers.forEach(function (m) { m.remove(); });
+    badgeMarkers = items.map(function (it) {
+      var el = document.createElement("div");
+      el.className = "rank-badge";
+      el.textContent = it.text;
+      el.title = "현장 점검 순번 " + it.text;
+      return new maplibregl.Marker({ element: el, anchor: "bottom" }).setLngLat([it.lon, it.lat]).addTo(map);
+    });
   }
 
   // 보기 설정: 지도 종류 세 가지를 작은 창에서 고른다 (주소: 없음 / ?map=real / ?map=basic)
@@ -444,7 +474,8 @@
         }).join("") + "</div>" +
         '<p class="conclusion">' + esc(demo.conclusion) + "</p>" +
         (reasonLines ? '<p class="note">판정불가 내역: ' + esc(reasonLines) + "</p>" : "") +
-        '<p class="note">' + esc(demo.rule_note) + "</p></div>";
+        '<p class="note">' + esc(demo.rule_note) + "</p></div>" +
+        '<div id="na-box"></div>';
     } else {
       html += '<p class="pending">이 법안은 아직 적용 기준(용도·면적·층수·연도)을 추출하지 않았습니다. 지도는 노후도 색으로 표시합니다.</p>';
     }
@@ -453,6 +484,15 @@
     el.innerHTML = html;
     el.classList.remove("hidden");
     el.querySelector(".close").addEventListener("click", function () { select(null); });
+    state.badgeList = [];
+    if (demo && window.NextActions) {
+      var na = NextActions.render({
+        el: $("na-box"), bill: b, demo: demo, props: state.props, region: "사창동", compact: true, badges: state.badges,
+        onBadges: function (on, top) { state.badges = on; state.badgeList = top; drawBadges(); },
+      });
+      state.badgeList = na.list.slice(0, NextActions.BADGE_N);
+    }
+    drawBadges();
   }
 
   function select(no) {

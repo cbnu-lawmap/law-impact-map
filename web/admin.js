@@ -895,6 +895,7 @@
       html += '<div class="card"><h3 style="margin-top:0">결론과 사유별 동수</h3><p style="margin:0 0 10px">' + esc(demo.conclusion) + "</p>" +
         reasonTable(J) + "</div>";
       html += "</div>";
+      html += '<div id="na-box"></div>';
       html += '<div id="xc-box"></div><div id="similar-box"></div>';
 
       html += "<h3>건물 명부</h3>";
@@ -911,6 +912,9 @@
         ui.roster = { no: no, page: 0, tab: J.counts.대상 ? "대상" : J.counts.경계선 ? "경계선" : "판정불가" };
       }
       drawRoster(no);
+      // 다음 할 일: 국회 의견서 초안 · 현장 점검 목록 (web/actions.js)
+      NextActions.render({ el: document.getElementById("na-box"), bill: b, demo: demo, props: D.props, region: D.region,
+        dept: prefs.dept, mapHref: "index.html?bill=" + no + "&rank=1" });
       bindProgressBox(no, rerender);
       bindAskThis(no);
       bindAgent(no);

@@ -315,7 +315,28 @@
 
     function recolor(colorOf) { if (layer) layer.recolor(colorOf); }
 
-    return { ready: ready, add: add, recolor: recolor, classify: function () { return classify; } };
+    // 현장 점검 순번 배지: list = [{lon, lat, h, text}] (빈 배열이면 지움). 건물에 가려지지 않게 깊이 검사를 끈다
+    var badgeEnts = [];
+    function setBadges(list) {
+      if (!viewer) return;
+      badgeEnts.forEach(function (e) { viewer.entities.remove(e); });
+      badgeEnts = (list || []).map(function (b) {
+        return viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(b.lon, b.lat, (b.h || 0) + 3),
+          label: {
+            text: String(b.text), font: "bold 15px 'Pretendard Variable', Pretendard, sans-serif",
+            fillColor: Cesium.Color.WHITE, showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString("#102038").withAlpha(0.92),
+            backgroundPadding: new Cesium.Cartesian2(7, 4),
+            verticalOrigin: Cesium.VerticalOrigin.BOTTOM, horizontalOrigin: Cesium.HorizontalOrigin.CENTER,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        });
+      });
+      viewer.scene.requestRender();
+    }
+
+    return { ready: ready, add: add, recolor: recolor, setBadges: setBadges, classify: function () { return classify; } };
   }
 
   global.VWorldMap = { create: create, BuildingLayer: BuildingLayer };

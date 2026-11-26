@@ -1,0 +1,46 @@
+/* 빼곡 · 다음 할 일 패널 (actions.js). 지도·행정 화면 공용 */
+.next-actions { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.next-actions h3 { margin: 0 0 8px; font-size: 15px; }
+.next-actions.compact h3 { font-size: 14px; }
+.na-step { padding: 10px 0; border-top: 1px solid var(--line); }
+.na-step:first-of-type { border-top: 0; padding-top: 2px; }
+.na-step-h { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; margin-bottom: 6px; }
+.na-num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #102038; color: #fff; font-size: 12px; font-weight: 700; }
+.na-sub { color: #5b6573; font-size: 12px; }
+.na-label { display: block; font-size: 12px; font-weight: 600; margin: 4px 0; }
+.na-hint { color: #6b7480; font-size: 12px; font-weight: 400; margin: 6px 0 0; }
+.na-op { width: 100%; box-sizing: border-box; font: inherit; font-size: 13px; line-height: 1.55; padding: 8px; border: 1px solid #c9d0da; border-radius: 6px; resize: vertical; }
+.na-op:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.na-btns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.na-btn { display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff !important;
+  font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none; line-height: 1.3; }
+.na-btn:hover { filter: brightness(1.08); }
+.na-btn.ghost { background: #fff; color: var(--accent) !important; }
+.na-btn.link { background: none; border-color: transparent; color: #5b6573 !important; text-decoration: underline; padding: 6px 4px; }
+.na-btn:disabled { opacity: .6; cursor: wait; }
+.na-check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; cursor: pointer; }
+.na-table { overflow: auto; max-height: 420px; border: 1px solid var(--line); border-radius: 6px; }
+.next-actions.compact .na-table { max-height: none; }
+.na-table table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.na-table th, .na-table td { padding: 5px 6px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.na-table th { position: sticky; top: 0; background: #f5f7f9; font-weight: 600; }
+.na-table .num { text-align: right; }
+.next-actions.compact .na-table th:nth-child(4), .next-actions.compact .na-table td:nth-child(4),
+.next-actions.compact .na-table th:nth-child(5), .next-actions.compact .na-table td:nth-child(5) { display: none; }
+.na-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; }
+.na-대상 { background: #c8372d; }
+.na-경계선 { background: #e0a020; }
+
+/* 의견서 미리보기 (화면 위에 덮는 창) */
+.op-modal { position: fixed; inset: 0; z-index: 1000; background: rgba(16, 32, 56, .55); display: flex; align-items: flex-start; justify-content: center; padding: 24px 16px; overflow: auto; }
+.op-sheet { width: min(820px, 100%); background: #eef1f4; border-radius: 10px; box-shadow: 0 12px 40px rgba(0, 0, 0, .3); overflow: hidden; }
+.op-bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; }
+.op-sp { flex: 1; }
+.op-paper { background: #fff; margin: 16px; padding: 36px 44px; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+@media (max-width: 600px) { .op-paper { padding: 20px 16px; margin: 8px; } }
+
+/* 가벼운 지도(MapLibre)의 순번 배지 */
+.rank-badge { min-width: 22px; padding: 2px 6px; border-radius: 11px; background: #102038; color: #fff; font: 700 13px/18px 'Pretendard Variable', Pretendard, sans-serif;
+  text-align: center; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); border: 1.5px solid #fff; }
+
+@media print { .next-actions, .op-modal { display: none !important; } }
