@@ -1436,7 +1436,22 @@
     var m = location.hash.match(/^#\/(?:bill|print)\/(\d+)$/);
     openAsk(m ? m[1] : null);
   });
+  // 전체 화면: 화면 전체를 덮는 크기로 키우고 글자를 18px 이상으로 (발표·회의용). Esc 로 원래 크기
+  var fullBtn = document.getElementById("ask-full");
+  function setAskFull(on) {
+    panel.classList.toggle("full", on);
+    document.body.classList.toggle("ask-full-on", on);
+    fullBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    fullBtn.textContent = on ? "원래 크기" : "전체 화면";
+    fullBtn.title = on ? "원래 크기로 줄이기 (Esc)" : "화면 전체로 크게 보기";
+    log.scrollTop = log.scrollHeight;
+  }
+  fullBtn.addEventListener("click", function () { setAskFull(!panel.classList.contains("full")); });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && panel.classList.contains("full")) setAskFull(false);
+  });
   document.getElementById("ask-close").addEventListener("click", function () {
+    setAskFull(false);
     panel.classList.add("hidden");
     document.getElementById("ask-fab").classList.remove("hidden");
   });
@@ -1467,7 +1482,7 @@
         a.innerHTML = '<div class="body">' + esc(j.answer) + '</div><div class="meta">' +
           (j.fixed ? "고정 안내 (AI 미사용)" : '<span class="tag">AI 답변 · 근거는 아래 법안</span>') +
           (src ? "<div>근거: " + src + "</div>" : "") +
-          ((j.unverified && j.unverified.length) ? '<div class="warn">⚠ 근거 자료에 없는 숫자: ' + esc(j.unverified.join(", ")) + " — 직접 확인하세요</div>" : "") +
+          ((j.unverified && j.unverified.length) ? '<div class="warn">⚠ 근거 자료에 없는 숫자: ' + esc(j.unverified.join(", ")) + " · 직접 확인하세요</div>" : "") +
           "</div>";
         log.scrollTop = log.scrollHeight;
       })
