@@ -4,24 +4,24 @@
  "rule": "hybrid top3 >= tfidf top3 → hybrid, 아니면 tfidf",
  "rrf_k": 60,
  "pool": 20,
- "bills": 714,
- "evaluated": 696,
- "last_propose_date": "2026-11-20",
+ "bills": 718,
+ "evaluated": 700,
+ "last_propose_date": "2026-11-24",
  "model": "paraphrase-multilingual-MiniLM-L12-v2",
  "tfidf": {
-  "top3": 0.8865,
-  "top1": 0.7328,
-  "top3_count": 617
+  "top3": 0.8871,
+  "top1": 0.7343,
+  "top3_count": 621
  },
  "emb": {
-  "top3": 0.7055,
-  "top1": 0.5072,
-  "top3_count": 491
+  "top3": 0.7057,
+  "top1": 0.5057,
+  "top3_count": 494
  },
  "hybrid": {
-  "top3": 0.8463,
-  "top1": 0.6739,
-  "top3_count": 589
+  "top3": 0.8443,
+  "top1": 0.6743,
+  "top3_count": 591
  },
- "random_top3": 0.1503
+ "random_top3": 0.1505
 }
