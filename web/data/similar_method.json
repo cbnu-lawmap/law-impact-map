@@ -4,9 +4,9 @@
  "rule": "hybrid top3 >= tfidf top3 → hybrid, 아니면 tfidf",
  "rrf_k": 60,
  "pool": 20,
- "bills": 718,
+ "bills": 719,
  "evaluated": 700,
- "last_propose_date": "2026-11-24",
+ "last_propose_date": "2026-11-25",
  "model": "paraphrase-multilingual-MiniLM-L12-v2",
  "tfidf": {
   "top3": 0.8871,
@@ -23,5 +23,5 @@
   "top1": 0.6743,
   "top3_count": 591
  },
- "random_top3": 0.1505
+ "random_top3": 0.1503
 }
