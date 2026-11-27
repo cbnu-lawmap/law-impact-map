@@ -1373,7 +1373,7 @@
     { sel: "#role", text: "역할을 고르면 첫 화면과 상황판 카드가 바뀝니다. 권한 차이는 없습니다." },
     { sel: "#mode", text: "심사·검증 모드에서는 판정 규칙·검증 메뉴와 원본 규칙이 함께 보입니다." },
     { sel: "#todo-cards", text: "지금 할 일: 검토 순서를 정해 줍니다. 법 적용 여부를 정하지는 않습니다." },
-    { sel: '#nav a[data-route="bills"]', text: "법안 검토 목록에서 678건을 찾고, 여러 건의 진행 상태를 한꺼번에 바꿀 수 있습니다." },
+    { sel: '#nav a[data-route="bills"]', text: function () { return "법안 검토 목록에서 " + fmt(D.bills.length) + "건을 찾고, 여러 건의 진행 상태를 한꺼번에 바꿀 수 있습니다."; } }, // 법안 수는 데이터에서
     { sel: '#nav a[data-route="progress"]', text: "진행 현황에서 검토가 어디까지 됐는지 보고, 담당자끼리 CSV로 주고받습니다." },
     { sel: "#settings-btn", text: "설정에서 질의 도우미를 끄거나 둘러보기를 다시 볼 수 있습니다. 행정망에서는 질의 도우미를 끄세요." },
     { sel: "#ask-fab", text: "질의 도우미에게 법안과 판정 결과를 물어볼 수 있습니다. 답 아래 근거 법안이 함께 나옵니다." },
@@ -1399,7 +1399,7 @@
     var r = el.getBoundingClientRect(), hole = document.getElementById("tour-hole"), pop = document.getElementById("tour-pop");
     hole.style.left = r.left - 4 + "px"; hole.style.top = r.top - 4 + "px";
     hole.style.width = r.width + 8 + "px"; hole.style.height = r.height + 8 + "px";
-    pop.innerHTML = "<div>" + esc(st.text) + '</div><div class="nav"><span class="muted small">' + (tourAt + 1) + " / " + steps.length +
+    pop.innerHTML = "<div>" + esc(typeof st.text === "function" ? st.text() : st.text) + '</div><div class="nav"><span class="muted small">' + (tourAt + 1) + " / " + steps.length +
       '</span><span><button type="button" class="linkish" id="tour-skip">그만 보기</button> <button type="button" class="btn" id="tour-next">' +
       (tourAt === steps.length - 1 ? "끝" : "다음") + "</button></span></div>";
     var top = r.bottom + 10;
